@@ -1,1 +1,41 @@
 # Sankey
+
+A private, client-side workspace for creating interactive Sankey diagrams. Built with React 19, TypeScript, Vite 8, and the D3 Sankey layout engine. No server, account, API key, analytics, or external runtime requests are required for the app itself. Fonts are bundled locally.
+
+## Run locally
+
+Requires Node.js 22.12+ (or a newer supported LTS release).
+
+```sh
+npm install
+npm run dev
+```
+
+## Features
+
+- Editable From → To → Amount connections with live diagram updates.
+- Balanced personal budget, company P&L, and job-search examples.
+- Multiple diagrams saved automatically in local browser storage.
+- Node selection highlights related flows; hover a ribbon for its share of the source.
+- Undo/redo, zoom, focus mode, color palettes, labels, amounts, and flow opacity controls.
+- PNG and SVG image export, plus JSON export/import for editable backups.
+- Cycle prevention and balance warnings; larger graphs expand in a scrollable canvas.
+- Keyboard navigation, responsive layouts, and reduced-motion support.
+
+Click a diagram title to rename it. Use the same exact node name to join flows; names are case-sensitive. An individual flow amount must be positive and at most 1 quadrillion. Each diagram supports up to 300 flows. Total flow counts sources only, so intermediate steps are not counted twice.
+
+## Privacy and backups
+
+Diagram data stays in `localStorage` on the current browser and origin. It does not synchronize between devices. Clearing browser/site data removes diagrams; use **Export → Editable diagram** for a portable backup. If saved data is malformed, readable diagrams are recovered and the original data is retained in the `sankey-studio-v1-recovery` storage key. An unavailable storage warning means you must export to keep your work.
+
+## Validation and static deployment
+
+```sh
+npm test
+npm run build
+npm run preview
+```
+
+The production build is emitted to `dist/` and can be served by any static hosting provider. `.openai/hosting.json` configures the optional private Sites deployment; it does not add an application backend.
+
+Tests cover template conservation, source totals, cycles, duplicate links, invalid input, import validation, large and deep layouts, and preservation of saved data. The production build checks TypeScript types.

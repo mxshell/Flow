@@ -31,8 +31,11 @@ import {
     PanelBottomClose,
     PanelBottomOpen,
     AlertCircle,
+    Trash2,
 } from "lucide-react";
 import SankeyChart from "./SankeyChart";
+import NodeCombobox from "./NodeCombobox";
+import type { NodeChoice } from "./NodeCombobox";
 import {
     analyze,
     appearance,
@@ -49,65 +52,8 @@ import {
 } from "./model";
 import type { Currency, Diagram, Flow, NumberFormat } from "./model";
 
-const STORAGE_KEY = "sankey-studio-v1";
-type Library = {
-    activeId: string;
-    docs: Diagram[];
-    recovery?: string;
-    blockSave?: boolean;
-};
-export function loadLibrary(): Library {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-            const saved = JSON.parse(raw);
-            if (Array.isArray(saved.docs) && saved.docs.length) {
-                const docs: Diagram[] = [];
-                let damaged = false;
-                for (const entry of saved.docs) {
-                    try {
-                        docs.push(parseDocument(entry));
-                    } catch {
-                        damaged = true;
-                    }
-                }
-                if (damaged)
-                    localStorage.setItem(`${STORAGE_KEY}-recovery`, raw);
-                if (docs.length)
-                    return {
-                        docs,
-                        activeId: docs.some(
-                            (d: Diagram) => d.id === saved.activeId,
-                        )
-                            ? saved.activeId
-                            : docs[0].id,
-                        recovery: damaged
-                            ? "Some saved diagrams could not be opened. Your original data is preserved in browser storage."
-                            : undefined,
-                    };
-                throw new Error("No readable diagrams");
-            }
-        }
-    } catch {
-        let blockSave = false;
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) localStorage.setItem(`${STORAGE_KEY}-recovery`, raw);
-        } catch {
-            blockSave = true;
-        }
-        const doc = template("budget");
-        return {
-            activeId: doc.id,
-            docs: [doc],
-            blockSave,
-            recovery:
-                "Saved diagrams could not be opened. Export your work to keep a copy.",
-        };
-    }
-    const doc = template("budget");
-    return { activeId: doc.id, docs: [doc] };
-}
+import { clearLocalData, loadLibrary, removeDiagram, saveLibrary, STORAGE_KEY } from "./storage";
+import type { Library } from "./storage";
 
 const examples = [
     {
@@ -174,17 +120,22 @@ function Modal({
     onClose,
     children,
     wide = false,
+    descriptionId,
+    destructive = false,
 }: {
     title: string;
     onClose: () => void;
     children: ReactNode;
     wide?: boolean;
+    descriptionId?: string;
+    destructive?: boolean;
 }) {
     const ref = useRef<HTMLDialogElement>(null);
     const headingId = useId();
     useEffect(() => {
         const dialog = ref.current;
         dialog?.showModal();
+        dialog?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
         return () => {
             dialog?.close();
         };
@@ -193,6 +144,8 @@ function Modal({
         <dialog
             ref={ref}
             aria-labelledby={headingId}
+            aria-describedby={descriptionId}
+            role={destructive ? "alertdialog" : "dialog"}
             className={`modal ${wide ? "modal-wide" : ""}`}
             onCancel={onClose}
             onClick={(e) => {
@@ -221,6 +174,7 @@ function FlowRow({
     onDelete,
     selected,
     amountLabel,
+    nodes,
 }: {
     flow: Flow;
     color: string;
@@ -228,6 +182,7 @@ function FlowRow({
     onDelete: () => void;
     selected: boolean;
     amountLabel: string;
+    nodes: NodeChoice[];
 }) {
     const [draft, setDraft] = useState({
         from: flow.from,
@@ -275,28 +230,20 @@ function FlowRow({
         >
             <div className="flow-row">
                 <span className="flow-dot" style={{ background: color }} />
-                <input
-                    aria-label={`From ${flow.from} to ${flow.to}`}
+                <NodeCombobox
+                    label={`From ${flow.from} to ${flow.to}`}
                     value={draft.from}
-                    maxLength={60}
-                    onChange={(e) => edit("from", e.target.value)}
-                    onBlur={commit}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                    list="node-names"
+                    nodes={nodes}
+                    onValueChange={value => setDraft(previous => ({ ...previous, from: value }))}
+                    onCommit={value => edit("from", value)}
                 />
                 <ArrowRight className="row-arrow" size={12} />
-                <input
-                    aria-label={`To for ${flow.from} to ${flow.to}`}
+                <NodeCombobox
+                    label={`To for ${flow.from} to ${flow.to}`}
                     value={draft.to}
-                    maxLength={60}
-                    onChange={(e) => edit("to", e.target.value)}
-                    onBlur={commit}
-                    onKeyDown={(e) => {
-                        if (e.key === "Enter") e.currentTarget.blur();
-                    }}
-                    list="node-names"
+                    nodes={nodes}
+                    onValueChange={value => setDraft(previous => ({ ...previous, to: value }))}
+                    onCommit={value => edit("to", value)}
                 />
                 <input
                     className="amount-input"
@@ -329,7 +276,12 @@ function FlowRow({
 
 export default function App() {
     const [library, setLibrary] = useState<Library>(loadLibrary);
-    const doc = library.docs.find((d) => d.id === library.activeId)!;
+    const [blankDiagram] = useState<Diagram>(() => ({
+        version: 2, id: uid(), title: "Untitled diagram", ...defaultNumberSettings,
+        kind: "custom", flows: [], columnTitles: [], appearance: { ...appearance },
+    }));
+    const activeDoc = library.docs.find((d) => d.id === library.activeId);
+    const doc = activeDoc ?? blankDiagram;
     const [past, setPast] = useState<Diagram[]>([]),
         [future, setFuture] = useState<Diagram[]>([]);
     const [tab, setTab] = useState<"data" | "appearance">("data");
@@ -340,35 +292,67 @@ export default function App() {
     const [selected, setSelected] = useState<string | null>(null);
     const [adding, setAdding] = useState(false),
         [addError, setAddError] = useState("");
+    const [newFlowNames, setNewFlowNames] = useState({ from: "", to: "" });
     const [toast, setToast] = useState(library.recovery ?? ""),
         [storageError, setStorageError] = useState(false);
     const [zoom, setZoom] = useState(100),
         [focusMode, setFocusMode] = useState(false),
         [editorOpen, setEditorOpen] = useState(true);
     const [renaming, setRenaming] = useState(false);
+    const [confirmation, setConfirmation] = useState<{ kind: "delete"; id: string } | { kind: "clear" } | null>(null);
+    const [deleteError, setDeleteError] = useState("");
+    const [libraryMessage, setLibraryMessage] = useState("");
+    const importGeneration = useRef(0);
+    const externallyLoadedLibrary = useRef<Library | null>(null);
     const importRef = useRef<HTMLInputElement>(null);
     const titleRef = useRef<HTMLInputElement>(null);
     const firstAddRef = useRef<HTMLInputElement>(null);
     const analysis = useMemo(() => analyze(doc.flows), [doc.flows]);
+    const nodeChoices = useMemo(() => analysis.nodes.map((node, index) => ({
+        name: node.name, color: nodeColor(node.name, index, doc.appearance.palette),
+    })), [analysis.nodes, doc.appearance.palette]);
 
     useEffect(() => {
+        // Reading another tab's save must not trigger a write back to that tab.
+        if (externallyLoadedLibrary.current === library) {
+            externallyLoadedLibrary.current = null;
+            setStorageError(Boolean(library.blockSave));
+            return;
+        }
         try {
-            if (library.blockSave) {
-                setStorageError(true);
-                return;
-            }
-            localStorage.setItem(
-                STORAGE_KEY,
-                JSON.stringify({
-                    activeId: library.activeId,
-                    docs: library.docs,
-                }),
-            );
+            saveLibrary(library);
             setStorageError(false);
         } catch {
             setStorageError(true);
         }
     }, [library]);
+    useEffect(() => {
+        function syncLibrary(event: StorageEvent) {
+            if (event.storageArea !== localStorage || (event.key !== STORAGE_KEY && event.key !== null)) return;
+            const next = loadLibrary();
+            externallyLoadedLibrary.current = next;
+            importGeneration.current++;
+            setLibrary(next);
+            setPast([]);
+            setFuture([]);
+            setSelected(null);
+            setAdding(false);
+            setAddError("");
+            setRenaming(false);
+            setMenu(null);
+            setConfirmation(null);
+            setDeleteError("");
+            setLibraryMessage("");
+            setZoom(100);
+            setFocusMode(false);
+            setEditorOpen(true);
+            setTab("data");
+            if (importRef.current) importRef.current.value = "";
+            setToast(next.docs.length ? "Saved diagrams updated in another tab" : "Saved diagrams cleared in another tab");
+        }
+        window.addEventListener("storage", syncLibrary);
+        return () => window.removeEventListener("storage", syncLibrary);
+    }, []);
     useEffect(() => {
         if (selected && !analysis.nodes.some((n) => n.name === selected))
             setSelected(null);
@@ -380,6 +364,7 @@ export default function App() {
     }, [toast]);
     useEffect(() => {
         if (adding) firstAddRef.current?.focus();
+        else setNewFlowNames({ from: "", to: "" });
     }, [adding]);
     useEffect(() => {
         if (renaming) {
@@ -442,6 +427,7 @@ export default function App() {
         return () => window.removeEventListener("keydown", shortcut);
     });
     function activate(id: string) {
+        setNewFlowNames({ from: "", to: "" });
         setLibrary((l) => ({ ...l, activeId: id }));
         setPast([]);
         setFuture([]);
@@ -451,8 +437,11 @@ export default function App() {
         setZoom(100);
         setEditorOpen(true);
         setTab("data");
+        setRenaming(false);
+        setAddError("");
     }
     function addDocument(next: Diagram) {
+        setNewFlowNames({ from: "", to: "" });
         setLibrary((l) => ({
             ...l,
             activeId: next.id,
@@ -466,6 +455,59 @@ export default function App() {
         setZoom(100);
         setEditorOpen(true);
         setTab("data");
+        setRenaming(false);
+        setAddError("");
+    }
+    function requestDeletion(action: NonNullable<typeof confirmation>) {
+        setMenu(null);
+        setModal("library");
+        setDeleteError("");
+        setConfirmation(action);
+    }
+    function cancelDeletion() {
+        setConfirmation(null);
+        setDeleteError("");
+    }
+    function confirmDeletion() {
+        if (!confirmation) return;
+        const clearing = confirmation.kind === "clear";
+        const next = clearing
+            ? { activeId: "", docs: [] }
+            : removeDiagram(library, confirmation.id);
+        try {
+            // Persist before changing the screen so failed deletions stay recoverable.
+            if (clearing) clearLocalData();
+            else saveLibrary(next);
+        } catch {
+            setDeleteError(clearing
+                ? "Could not clear all local data. Check that browser storage is available and try again."
+                : "Could not delete this diagram from browser storage. Try again.");
+            return;
+        }
+        if (clearing || next.activeId !== library.activeId) {
+            importGeneration.current++;
+            setPast([]);
+            setFuture([]);
+            setSelected(null);
+            setAdding(false);
+            setAddError("");
+            setRenaming(false);
+            setZoom(100);
+            setFocusMode(false);
+            setEditorOpen(true);
+            setTab("data");
+            if (importRef.current) importRef.current.value = "";
+        }
+        setLibrary(next);
+        setStorageError(false);
+        cancelDeletion();
+        if (clearing) {
+            setModal(null);
+            setLibraryMessage("");
+            setToast("All local data cleared");
+        } else {
+            setLibraryMessage("Diagram deleted");
+        }
     }
     function newDocument() {
         addDocument({
@@ -605,8 +647,11 @@ export default function App() {
             setToast("Choose a JSON file smaller than 2 MB.");
             return;
         }
+        const generation = importGeneration.current;
         try {
-            const next = parseDocument(JSON.parse(await file.text()));
+            const text = await file.text();
+            if (generation !== importGeneration.current) return;
+            const next = parseDocument(JSON.parse(text));
             addDocument({ ...next, id: uid() });
             setToast("Diagram imported");
         } catch (e) {
@@ -635,7 +680,10 @@ export default function App() {
                 <div className="header-actions">
                     <button
                         className="button quiet library-button"
-                        onClick={() => setModal("library")}
+                        onClick={() => {
+                            setLibraryMessage("");
+                            setModal("library");
+                        }}
                     >
                         <FolderOpen size={16} /> My diagrams{" "}
                         <span className="count-badge">
@@ -649,6 +697,7 @@ export default function App() {
             </header>
 
             <main>
+                {activeDoc ? <>
                 <section className="page-heading">
                     <div>
                         <div className="breadcrumb">
@@ -1029,6 +1078,7 @@ export default function App() {
                                             <FlowRow
                                                 key={f.id}
                                                 flow={f}
+                                                nodes={nodeChoices}
                                                 amountLabel={doc.numberFormat === "integer" ? "Count" : "Amount"}
                                                 color={nodeColor(
                                                     f.to,
@@ -1062,14 +1112,6 @@ export default function App() {
                                             </p>
                                         )}
                                     </div>
-                                    <datalist id="node-names">
-                                        {analysis.nodes.map((n) => (
-                                            <option
-                                                key={n.name}
-                                                value={n.name}
-                                            />
-                                        ))}
-                                    </datalist>
                                     {adding ? (
                                         <form
                                             className="add-form"
@@ -1089,28 +1131,34 @@ export default function App() {
                                                 </button>
                                             </div>
                                             <div className="add-fields">
-                                                <label>
-                                                    From
-                                                    <input
-                                                        ref={firstAddRef}
+                                                <div className="node-field">
+                                                    <label htmlFor="new-flow-from">From</label>
+                                                    <NodeCombobox
+                                                        inputId="new-flow-from"
+                                                        inputRef={firstAddRef}
                                                         required
                                                         name="from"
+                                                        label="From node"
                                                         placeholder="e.g. Salary"
-                                                        list="node-names"
-                                                        maxLength={60}
+                                                        nodes={nodeChoices}
+                                                        value={newFlowNames.from}
+                                                        onValueChange={from => setNewFlowNames(previous => ({ ...previous, from }))}
                                                     />
-                                                </label>
+                                                </div>
                                                 <ArrowRight size={15} />
-                                                <label>
-                                                    To
-                                                    <input
+                                                <div className="node-field">
+                                                    <label htmlFor="new-flow-to">To</label>
+                                                    <NodeCombobox
+                                                        inputId="new-flow-to"
                                                         required
                                                         name="to"
+                                                        label="To node"
                                                         placeholder="e.g. Income"
-                                                        list="node-names"
-                                                        maxLength={60}
+                                                        nodes={nodeChoices}
+                                                        value={newFlowNames.to}
+                                                        onValueChange={to => setNewFlowNames(previous => ({ ...previous, to }))}
                                                     />
-                                                </label>
+                                                </div>
                                             </div>
                                             <label className="add-amount-label">
                                                 {doc.numberFormat === "integer"
@@ -1375,7 +1423,18 @@ export default function App() {
                         </div>
                     </aside>
                 </section>
-
+                </> : (
+                    <section className="empty-workspace">
+                        <span className="empty-library-icon"><FolderOpen size={27} /></span>
+                        <h1>No saved diagrams</h1>
+                        <p>Create a diagram, import a saved copy, or pick an example below.</p>
+                        <div className="empty-workspace-actions">
+                            <button className="button primary" onClick={newDocument}><Plus size={16} /> New diagram</button>
+                            <button className="button secondary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import diagram</button>
+                        </div>
+                        {storageError && <p className="save-error" role="status">Device storage unavailable — export JSON to keep your work.</p>}
+                    </section>
+                )}
                 <section className="examples-strip">
                     <div className="examples-label">
                         <LayoutTemplate size={19} />
@@ -1409,10 +1468,10 @@ export default function App() {
                     ))}
                 </section>
                 <footer className="page-footer">
-                    <span>
-                        <LockKeyhole size={12} /> Your data stays in your
-                        browser.
-                    </span>
+                    <div className="footer-data-controls">
+                        <span><LockKeyhole size={12} /> Your data stays in your browser.</span>
+                        <button className="clear-data-link" onClick={() => requestDeletion({ kind: "clear" })}>Clear all local data</button>
+                    </div>
                     <span>A little clarity goes a long way.</span>
                 </footer>
             </main>
@@ -1470,12 +1529,14 @@ export default function App() {
                     </button>
                 </Modal>
             )}
-            {modal === "library" && (
+            {modal === "library" && !confirmation && (
                 <Modal title="My diagrams" onClose={() => setModal(null)}>
                     <p className="modal-description">
                         Saved in this browser. Export a diagram to keep a copy.
                     </p>
+                    {libraryMessage && <p className="library-feedback" role="status"><Check size={15} /> {libraryMessage}</p>}
                     <div className="library-list">
+                        {!library.docs.length && <div className="library-empty"><FolderOpen size={25} /><p>No saved diagrams yet.</p></div>}
                         {library.docs.map((d) => (
                             <div
                                 key={d.id}
@@ -1508,6 +1569,13 @@ export default function App() {
                                 >
                                     <Copy size={15} />
                                 </button>
+                                <button
+                                    className="button quiet delete-diagram-button"
+                                    aria-label={`Delete ${d.title}`}
+                                    onClick={() => requestDeletion({ kind: "delete", id: d.id })}
+                                >
+                                    <Trash2 size={15} /> Delete
+                                </button>
                             </div>
                         ))}
                     </div>
@@ -1517,6 +1585,34 @@ export default function App() {
                     >
                         <Plus size={16} /> New diagram
                     </button>
+                    <div className="library-data-actions">
+                        <button className="button quiet danger-text" onClick={() => requestDeletion({ kind: "clear" })}>
+                            <Trash2 size={16} /> Clear all local data
+                        </button>
+                    </div>
+                </Modal>
+            )}
+            {confirmation && (
+                <Modal
+                    title={confirmation.kind === "clear" ? "Clear all local data?" : "Delete diagram?"}
+                    onClose={cancelDeletion}
+                    descriptionId="delete-description"
+                    destructive
+                >
+                    <p className="modal-description confirm-description" id="delete-description">
+                        {confirmation.kind === "clear" ? <>
+                            This permanently deletes all saved diagrams, their settings, and recovery copies from this browser. This cannot be undone.
+                        </> : <>
+                            Permanently delete <strong>“{library.docs.find(d => d.id === confirmation.id)?.title}”</strong> from this browser? This cannot be undone.
+                        </>}
+                    </p>
+                    {deleteError && <p className="deletion-error" role="alert"><AlertCircle size={17} /> {deleteError}</p>}
+                    <div className="confirm-actions">
+                        <button className="button secondary" data-autofocus onClick={cancelDeletion}>Cancel</button>
+                        <button className="button danger" onClick={confirmDeletion}>
+                            <Trash2 size={16} /> {confirmation.kind === "clear" ? "Clear all local data" : "Delete diagram"}
+                        </button>
+                    </div>
                 </Modal>
             )}
             {modal === "help" && (

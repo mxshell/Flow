@@ -4,18 +4,20 @@ A private, client-side workspace for creating interactive Sankey diagrams. Built
 
 ## Run locally
 
-Requires Node.js 22.12+ (or a newer supported LTS release).
+Requires Node.js 22.12+ (or a newer supported LTS release) and pnpm 10.28.0, pinned in `package.json`.
 
 ```sh
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 ## Features
 
 - Editable From → To → Amount connections with live diagram updates.
+- Searchable From/To selectors with matching text highlights, keyboard navigation, and a clear option to create a new node. Choosing a name, pressing Enter, or leaving the field commits the edit; Escape cancels an open search.
 - Balanced personal budget, company P&L, and job-search examples.
 - Multiple diagrams saved automatically in local browser storage.
+- Delete saved diagrams from **My diagrams**, or use **Clear all local data** to remove every diagram and recovery copy from this browser. Both actions ask for confirmation.
 - Node selection highlights related flows; hover a ribbon for its share of the source.
 - Undo/redo, zoom, focus mode, color palettes, labels, amounts, and flow opacity controls.
 - Currency, Decimal, and Whole number display formats, with a separate currency selector.
@@ -36,12 +38,14 @@ Diagram data stays in `localStorage` on the current browser and origin. It does 
 
 ## Validation and static deployment
 
+For automated builds, use `pnpm install --frozen-lockfile` to install the exact versions in `pnpm-lock.yaml`.
+
 ```sh
-npm test
-npm run build
-npm run preview
+pnpm test
+pnpm build
+pnpm preview
 ```
 
-The production build is emitted to `dist/` and can be served by any static hosting provider. `.openai/hosting.json` configures the optional private Sites deployment; it does not add an application backend.
+The production build is emitted to `dist/` and can be served by any static hosting provider.
 
 Tests cover template conservation, source totals, cycles, duplicate links, invalid input, import validation, large and deep layouts, and preservation of saved data. The production build checks TypeScript types.

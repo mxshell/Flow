@@ -275,8 +275,8 @@ function FlowRow({
     );
 }
 
-export default function App() {
-    const [library, setLibrary] = useState<Library>(loadLibrary);
+export default function App({ initialLibrary }: { initialLibrary?: Library } = {}) {
+    const [library, setLibrary] = useState<Library>(() => initialLibrary ?? loadLibrary());
     const [blankDiagram] = useState<Diagram>(() => ({
         version: 2, id: uid(), title: "Untitled diagram", ...defaultNumberSettings,
         kind: "custom", flows: [], columnTitles: [], appearance: { ...appearance },
@@ -568,7 +568,7 @@ export default function App() {
         const url = URL.createObjectURL(blob),
             link = document.createElement("a");
         link.href = url;
-        link.download = `${doc.title.replace(/[^a-z0-9_-]/gi, "-").toLowerCase() || "sankey"}.${extension}`;
+        link.download = `${doc.title.replace(/[^a-z0-9_-]/gi, "-").toLowerCase() || "flow"}.${extension}`;
         link.click();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         setMenu(null);
@@ -661,14 +661,14 @@ export default function App() {
         <div className={`app ${focusMode ? "focus-mode" : ""}`}>
             <header className="app-header">
                 <a
-                    href="#"
+                    href="/"
                     className="brand"
                     onClick={(e) => e.preventDefault()}
-                    aria-label="Sankey workspace"
+                    aria-label="Flow workspace"
                 >
                     <img src="/favicon.svg" width="33" height="33" alt="" />
                     <span>
-                        sankey<span className="brand-period">.</span>
+                        Flow<span className="brand-period">.</span>
                     </span>
                 </a>
                 <span className="header-divider" />
@@ -1431,8 +1431,9 @@ export default function App() {
                 </> : (
                     <section className="empty-workspace">
                         <span className="empty-library-icon"><FolderOpen size={27} /></span>
-                        <h1>No saved diagrams</h1>
-                        <p>Create a diagram, import a saved copy, or pick an example below.</p>
+                        <h1>Create a Sankey diagram</h1>
+                        <p>See where your money, revenue, or job applications go.<br />Start a diagram or choose an example below.</p>
+                        <p className="workspace-benefits">Free to use · No sign-up · Your data stays in your browser</p>
                         <div className="empty-workspace-actions">
                             <button className="button primary" onClick={newDocument}><Plus size={16} /> New diagram</button>
                             <button className="button secondary" onClick={() => importRef.current?.click()}><Upload size={16} /> Import diagram</button>
@@ -1472,6 +1473,15 @@ export default function App() {
                         </button>
                     ))}
                 </section>
+                {!activeDoc && <section className="about-flow" aria-labelledby="about-flow-title">
+                    <h2 id="about-flow-title">Turn numbers into a clear picture.</h2>
+                    <p>A Sankey diagram shows how amounts move between steps. Wider connections mean larger amounts.</p>
+                    <div className="flow-benefits">
+                        <div><h3>Budgets, business, and job searches</h3><p>Map personal income and spending, company revenue and profit, or applications, interviews, and offers.</p></div>
+                        <div><h3>Edit, save, and share</h3><p>Type your flows to update the chart instantly. Export PNG or SVG images, or save editable JSON to open again in Flow.</p></div>
+                        <div><h3>Private by design</h3><p>Your diagrams stay in this browser. No account, upload, or subscription is needed.</p></div>
+                    </div>
+                </section>}
                 <footer className="page-footer">
                     <div className="footer-data-controls">
                         <span><LockKeyhole size={12} /> Your data stays in your browser.</span>

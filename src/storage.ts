@@ -1,6 +1,7 @@
 import { parseDocument, template, uid } from "./model";
 import type { Diagram } from "./model";
 
+// Keep the original keys so existing diagrams and recovery copies remain available in Flow.
 export const STORAGE_KEY = "sankey-studio-v1";
 const RECOVERY_KEY = `${STORAGE_KEY}-recovery`;
 

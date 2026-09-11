@@ -1,6 +1,6 @@
-# Sankey
+# Flow
 
-A private, client-side workspace for creating interactive Sankey diagrams. Built with React 19, TypeScript, Vite 8, and the D3 Sankey layout engine. No server, account, API key, analytics, or external runtime requests are required for the app itself. Fonts are bundled locally.
+Flow is a private, client-side workspace for creating interactive Sankey diagrams. Built with React 19, TypeScript, Vite 8, and the D3 Sankey layout engine. No server, account, API key, analytics, or external runtime requests are required for the app itself. Fonts are bundled locally.
 
 ## Run locally
 
@@ -46,6 +46,21 @@ pnpm build
 pnpm preview
 ```
 
-The production build is emitted to `dist/` and can be served by any static hosting provider.
+The production build is emitted to `dist/` and can be served by any static hosting provider. `pnpm build` also pre-renders the public workspace into HTML, using the same React component as the app. This happens at build time only: the deployed app still needs no server, and saved diagrams are loaded only in the visitor’s browser.
 
-Tests cover template conservation, source totals, cycles, duplicate links, invalid input, import validation, stable saved IDs, recovery failures, searchable selector navigation, Unicode labels and headings, tiny flow values, large and deep layouts, and PNG size limits. The production build checks TypeScript types.
+## Search and sharing
+
+The canonical public URL is **https://flow.mxshell.dev/**. The production output includes:
+
+- A descriptive title and meta description, canonical URL, Open Graph and Twitter card metadata.
+- WebSite and WebApplication structured data describing the actual app, without ratings or reviews.
+- The public introduction and example choices in `index.html`, readable before JavaScript runs. This follows [Google’s guidance for JavaScript SEO](https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics).
+- `robots.txt`, a sitemap containing the homepage, and a 1200 × 630 PNG share preview.
+
+Deploy the entire `dist/` directory. Serve `/robots.txt`, `/sitemap.xml`, and `/social-preview.png` as their actual files, and return a proper 404 for unknown paths. Keep JavaScript, CSS, fonts, and images accessible to crawlers. The canonical and sharing metadata always describe Flow; private diagram names and amounts are never included.
+
+After deployment, submit `https://flow.mxshell.dev/sitemap.xml` in Google Search Console and inspect the homepage URL. Indexing and search-result appearance are determined by search engines. A different domain requires updating `index.html`, `public/robots.txt`, and `public/sitemap.xml`; the SEO tests check that their URLs agree.
+
+The share image is a checked-in asset, so building Flow does not require Python. To regenerate it, run `python3 scripts/create-social-preview.py` in an environment with Pillow and Arial or DejaVu Sans installed.
+
+Tests cover template conservation, source totals, cycles, duplicate links, invalid input, import validation, stable saved IDs, recovery failures, searchable selector navigation, Unicode labels and headings, tiny flow values, large and deep layouts, and PNG size limits. The production build checks TypeScript types. SEO tests also check canonical and sitemap consistency, sharing metadata, structured data, and storage-free public rendering.

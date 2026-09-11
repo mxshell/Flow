@@ -149,9 +149,9 @@ export function nodeColor(name: string, index: number, palette: Appearance['pale
 }
 
 export function parseDocument(raw: unknown): Diagram {
-  if (!raw || typeof raw !== 'object') throw new Error('Choose a Sankey JSON file exported from this app.');
+  if (!raw || typeof raw !== 'object') throw new Error('Choose a Flow JSON file exported from this app.');
   const d = raw as Record<string, unknown>;
-  if ((d.version !== 1 && d.version !== 2) || typeof d.title !== 'string' || !Array.isArray(d.flows) || d.flows.length > 300) throw new Error('This file is not a supported Sankey diagram (maximum 300 flows).');
+  if ((d.version !== 1 && d.version !== 2) || typeof d.title !== 'string' || !Array.isArray(d.flows) || d.flows.length > 300) throw new Error('This file is not a supported Flow diagram (maximum 300 flows).');
   if (d.version === 1 && typeof d.unit !== 'string') throw new Error('This older diagram is missing its number format.');
   const isCurrency = (value: unknown): value is Currency => currencies.some(c => c.code === value);
   const numberFormat: NumberFormat = d.version === 1

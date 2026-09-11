@@ -1,31 +1,70 @@
 export type Flow = { id: string; from: string; to: string; amount: number };
 export type Appearance = { palette: 'original' | 'ocean' | 'sunset'; labels: boolean; values: boolean; opacity: number; nodeWidth: number };
-export type Diagram = { version: 1; id: string; title: string; unit: string; kind: 'budget' | 'business' | 'jobs' | 'custom'; flows: Flow[]; appearance: Appearance };
+export const currencies = [
+  { code: 'USD', name: 'US dollar' },
+  { code: 'SGD', name: 'Singapore dollar' },
+  { code: 'EUR', name: 'Euro' },
+  { code: 'GBP', name: 'British pound' },
+  { code: 'JPY', name: 'Japanese yen' },
+  { code: 'CNY', name: 'Chinese yuan' },
+  { code: 'AUD', name: 'Australian dollar' },
+  { code: 'CAD', name: 'Canadian dollar' },
+  { code: 'CHF', name: 'Swiss franc' },
+  { code: 'HKD', name: 'Hong Kong dollar' },
+  { code: 'INR', name: 'Indian rupee' },
+  { code: 'MYR', name: 'Malaysian ringgit' },
+  { code: 'IDR', name: 'Indonesian rupiah' },
+  { code: 'NZD', name: 'New Zealand dollar' },
+] as const;
+export type Currency = typeof currencies[number]['code'];
+export type NumberFormat = 'currency' | 'decimal' | 'integer';
+export type NumberSettings = { numberFormat: NumberFormat; currency: Currency };
+export type Diagram = NumberSettings & { version: 2; id: string; title: string; columnTitles: string[]; kind: 'budget' | 'business' | 'jobs' | 'custom'; flows: Flow[]; appearance: Appearance };
+export const COLUMN_TITLE_MAX_LENGTH = 60;
+export function defaultColumnTitles(kind: Diagram['kind']): string[] {
+  switch (kind) {
+    case 'budget': return ['Income', 'Total', 'Allocation'];
+    case 'business': return ['Sources', 'Revenue', 'Gross margin', 'Operations', 'Net result'];
+    case 'jobs': return ['Applications', 'Screening', 'Interviews', 'Interview results', 'Offer decisions'];
+    default: return [];
+  }
+}
+const cleanColumnTitle = (title: string) => title.replace(/\s+/g, ' ').trim().slice(0, COLUMN_TITLE_MAX_LENGTH);
+export function columnTitle(doc: Pick<Diagram, 'kind' | 'columnTitles'>, depth: number) {
+  return doc.columnTitles?.[depth]?.trim() || defaultColumnTitles(doc.kind)[depth] || `Column ${depth + 1}`;
+}
+export function renameColumn(doc: Diagram, depth: number, title: string): Diagram {
+  if (!Number.isInteger(depth) || depth < 0 || depth > 300) return doc;
+  const columnTitles = [...(doc.columnTitles ?? defaultColumnTitles(doc.kind))];
+  columnTitles[depth] = cleanColumnTitle(title);
+  return { ...doc, columnTitles };
+}
+export const defaultNumberSettings: NumberSettings = { numberFormat: 'currency', currency: 'USD' };
 export const appearance: Appearance = { palette: 'original', labels: true, values: true, opacity: 0.34, nodeWidth: 13 };
 export const uid = () => crypto.randomUUID();
 const rows = (data: [string, string, number][]): Flow[] => data.map(([from, to, amount]) => ({ id: uid(), from, to, amount }));
 export function template(kind: 'budget' | 'business' | 'jobs'): Diagram {
   const examples = {
-    budget: { title: 'My monthly budget', unit: 'USD', flows: rows([
+    budget: { title: 'My monthly budget', numberFormat: 'currency' as const, flows: rows([
       ['Salary', 'Total income', 5200], ['Freelance', 'Total income', 800],
       ['Total income', 'Housing', 1800], ['Total income', 'Living expenses', 1200],
       ['Total income', 'Savings', 1500], ['Total income', 'Food & dining', 700],
       ['Total income', 'Transport', 400], ['Total income', 'A little fun', 400],
     ]) },
-    business: { title: 'Company profit & loss', unit: 'USD', flows: rows([
+    business: { title: 'Company profit & loss', numberFormat: 'currency' as const, flows: rows([
       ['Product sales', 'Revenue', 840000], ['Services', 'Revenue', 360000],
       ['Revenue', 'Cost of sales', 420000], ['Revenue', 'Gross profit', 780000],
       ['Gross profit', 'Operating costs', 480000], ['Gross profit', 'Operating profit', 300000],
       ['Operating profit', 'Taxes', 60000], ['Operating profit', 'Net profit', 240000],
     ]) },
-    jobs: { title: 'My job search', unit: 'applications', flows: rows([
+    jobs: { title: 'My job search', numberFormat: 'integer' as const, flows: rows([
       ['Applications', 'No response', 50], ['Applications', 'Not shortlisted', 25], ['Applications', 'Shortlisted', 25],
       ['Shortlisted', 'Interviews', 20], ['Shortlisted', 'Withdrawn', 5],
       ['Interviews', 'Not selected', 12], ['Interviews', 'Offers', 8],
       ['Offers', 'Declined', 5], ['Offers', 'Accepted', 3],
     ]) },
   };
-  return { version: 1, id: uid(), kind, ...examples[kind], appearance: { ...appearance } };
+  return { version: 2, id: uid(), kind, currency: 'USD', columnTitles: defaultColumnTitles(kind), ...examples[kind], appearance: { ...appearance } };
 }
 
 export function analyze(flows: Flow[]) {
@@ -61,10 +100,32 @@ export function analyze(flows: Flow[]) {
   return { nodes: [...nodes.values()], links: [...edges.values()], errors: [...new Set(errors)], balances, total: [...nodes.values()].filter(n => n.incoming === 0).reduce((s, n) => s + n.outgoing, 0) };
 }
 
-export function formatAmount(value: number, unit: string, compact = false) {
-  const numeric = new Intl.NumberFormat('en-US', { maximumFractionDigits: compact ? 1 : 2, notation: compact ? 'compact' : 'standard' });
-  const symbol: Record<string, string> = { USD: '$', SGD: 'S$', EUR: '€', GBP: '£' };
-  return `${symbol[unit] ?? ''}${numeric.format(value)}`;
+const formatters = new Map<string, Intl.NumberFormat>();
+export function formatAmount(value: number, settings: NumberSettings, compact = false) {
+  const key = `${settings.numberFormat}:${settings.currency}:${compact}`;
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    const options: Intl.NumberFormatOptions = { notation: compact ? 'compact' : 'standard', useGrouping: true };
+    if (settings.numberFormat === 'currency') {
+      options.style = 'currency';
+      options.currency = settings.currency;
+      if (compact) { options.minimumFractionDigits = 0; options.maximumFractionDigits = 1; }
+    } else if (settings.numberFormat === 'integer') {
+      options.maximumFractionDigits = 0;
+    } else if (compact) {
+      options.maximumFractionDigits = 1;
+    } else {
+      // Keep small fractional flows visible without exposing floating-point noise.
+      options.maximumSignificantDigits = 15;
+    }
+    formatter = new Intl.NumberFormat('en-US', options);
+    formatters.set(key, formatter);
+  }
+  return formatter.format(value);
+}
+
+export function numberFormatLabel(settings: NumberSettings) {
+  return settings.numberFormat === 'currency' ? `${settings.currency} · Currency` : settings.numberFormat === 'integer' ? 'Whole number' : 'Decimal';
 }
 
 export const palettes = {
@@ -90,7 +151,13 @@ export function nodeColor(name: string, index: number, palette: Appearance['pale
 export function parseDocument(raw: unknown): Diagram {
   if (!raw || typeof raw !== 'object') throw new Error('Choose a Sankey JSON file exported from this app.');
   const d = raw as Record<string, unknown>;
-  if (d.version !== 1 || typeof d.title !== 'string' || typeof d.unit !== 'string' || !Array.isArray(d.flows) || d.flows.length > 300) throw new Error('This file is not a supported Sankey diagram (maximum 300 flows).');
+  if ((d.version !== 1 && d.version !== 2) || typeof d.title !== 'string' || !Array.isArray(d.flows) || d.flows.length > 300) throw new Error('This file is not a supported Sankey diagram (maximum 300 flows).');
+  if (d.version === 1 && typeof d.unit !== 'string') throw new Error('This older diagram is missing its number format.');
+  const isCurrency = (value: unknown): value is Currency => currencies.some(c => c.code === value);
+  const numberFormat: NumberFormat = d.version === 1
+    ? isCurrency(d.unit) ? 'currency' : d.unit === 'applications' ? 'integer' : 'decimal'
+    : ['currency', 'decimal', 'integer'].includes(String(d.numberFormat)) ? d.numberFormat as NumberFormat : 'decimal';
+  const currency: Currency = d.version === 1 && isCurrency(d.unit) ? d.unit : isCurrency(d.currency) ? d.currency : 'USD';
   const flows = d.flows.map((f: unknown) => {
     if (!f || typeof f !== 'object') throw new Error('Every flow needs From, To, and Amount values.');
     const r = f as Record<string, unknown>;
@@ -100,6 +167,11 @@ export function parseDocument(raw: unknown): Diagram {
   const result = analyze(flows);
   if (result.errors.length) throw new Error(result.errors[0]);
   const a = (d.appearance ?? {}) as Partial<Appearance>;
-  return { version: 1, id: typeof d.id === 'string' ? d.id : uid(), title: d.title.slice(0, 100) || 'Untitled diagram', unit: ['USD', 'SGD', 'EUR', 'GBP', 'applications', 'number'].includes(d.unit) ? d.unit : 'number', kind: ['budget', 'business', 'jobs'].includes(String(d.kind)) ? d.kind as Diagram['kind'] : 'custom', flows,
+  const kind: Diagram['kind'] = ['budget', 'business', 'jobs'].includes(String(d.kind)) ? d.kind as Diagram['kind'] : 'custom';
+  // Preserve slots and hidden columns so edits survive a temporarily shorter graph.
+  const columnTitles = Array.isArray(d.columnTitles)
+    ? d.columnTitles.slice(0, 301).map(title => typeof title === 'string' ? cleanColumnTitle(title) : '')
+    : defaultColumnTitles(kind);
+  return { version: 2, id: typeof d.id === 'string' ? d.id : uid(), title: d.title.slice(0, 100) || 'Untitled diagram', columnTitles, numberFormat, currency, kind, flows,
     appearance: { palette: a.palette && Object.hasOwn(palettes, a.palette) ? a.palette : 'original', labels: typeof a.labels === 'boolean' ? a.labels : true, values: typeof a.values === 'boolean' ? a.values : true, opacity: typeof a.opacity === 'number' && a.opacity >= 0.1 && a.opacity <= 0.8 ? a.opacity : 0.34, nodeWidth: typeof a.nodeWidth === 'number' && a.nodeWidth >= 6 && a.nodeWidth <= 28 ? a.nodeWidth : 13 } };
 }

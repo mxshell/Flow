@@ -18,11 +18,17 @@ npm run dev
 - Multiple diagrams saved automatically in local browser storage.
 - Node selection highlights related flows; hover a ribbon for its share of the source.
 - Undo/redo, zoom, focus mode, color palettes, labels, amounts, and flow opacity controls.
+- Currency, Decimal, and Whole number display formats, with a separate currency selector.
+- Consistent column headings on every diagram. Click a heading or its pencil to rename it in place; Enter or clicking away saves, and Escape cancels.
 - PNG and SVG image export, plus JSON export/import for editable backups.
 - Cycle prevention and balance warnings; larger graphs expand in a scrollable canvas.
 - Keyboard navigation, responsive layouts, and reduced-motion support.
 
 Click a diagram title to rename it. Use the same exact node name to join flows; names are case-sensitive. An individual flow amount must be positive and at most 1 quadrillion. Each diagram supports up to 300 flows. Total flow counts sources only, so intermediate steps are not counted twice.
+
+Column titles are saved by position from left to right and included in JSON, SVG, and PNG exports. Examples start with descriptive titles; new columns use “Column 1”, “Column 2”, and so on. Clearing a title restores its suggested name. Titles support undo/redo and remain saved when a column temporarily disappears.
+
+**Format** controls display only: currency formatting follows the selected currency’s decimal places, Decimal preserves fractional values, and Whole number rounds labels to integers. Original amounts remain editable and unchanged; selecting a different currency does not perform an exchange-rate conversion. Existing version 1 diagrams migrate automatically, including job-search diagrams to Whole number. New JSON exports use version 2.
 
 ## Privacy and backups
 

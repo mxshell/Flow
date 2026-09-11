@@ -9,6 +9,16 @@ function storage(initial: string) {
   return values;
 }
 describe('saved diagram recovery', () => {
+  it('opens existing job-search diagrams as whole numbers and preserves their values', () => {
+    const current = template('jobs');
+    const { numberFormat: _format, currency: _currency, ...fields } = current;
+    const legacy = { ...fields, version: 1, unit: 'applications' };
+    storage(JSON.stringify({ activeId: legacy.id, docs: [legacy] }));
+    const recovered = loadLibrary();
+    expect(recovered.docs[0].numberFormat).toBe('integer');
+    expect(recovered.docs[0].flows.map(f => f.amount)).toEqual(legacy.flows.map(f => f.amount));
+    expect(recovered.recovery).toBeUndefined();
+  });
   it('preserves all diagrams, including the active 101st document', () => {
     const docs = Array.from({ length: 101 }, () => template('budget'));
     storage(JSON.stringify({ activeId: docs[100].id, docs }));

@@ -4,9 +4,50 @@ import { columnTitle, defaultColumnTitles, parseDocument, renameColumn, template
 import type { Diagram, Flow } from './model';
 import { buildLayout } from './layout';
 import SankeyChart from './SankeyChart';
+import ColumnTitle from './ColumnTitle';
 
 const flow = (from: string, to: string, id = from): Flow => ({ id, from, to, amount: 10 });
 const custom = (): Diagram => ({ ...template('budget'), kind: 'custom', columnTitles: [], flows: [flow('A', 'B'), flow('B', 'C')] });
+
+const renderedTitle = (title: string, width: number) => renderToStaticMarkup(
+  <svg><ColumnTitle title={title} depth={0} x={100} width={width} onRename={() => {}} /></svg>,
+);
+const renderedLines = (markup: string) => [...markup.matchAll(/<tspan\b([^>]*)>([^<]*)<\/tspan>/g)]
+  .map(match => ({ attributes: match[1], text: match[2] }));
+
+describe('column-title wrapping', () => {
+  it.each(['ß', 'ﬃ'])('keeps the complete uppercase expansion of %s in three lines', character => {
+    const title = character.repeat(60);
+    const lines = renderedLines(renderedTitle(title, 160));
+    expect(lines).toHaveLength(3);
+    expect(lines.map(line => line.text).join('')).toBe(title.toUpperCase());
+    expect(lines.map(line => Number(line.attributes.match(/y="(\d+)"/)?.[1]))).toEqual([18, 31, 44]);
+  });
+  it.each(['👩‍💻', 'e\u0301'])('wraps %s without splitting its graphemes', grapheme => {
+    const title = grapheme.repeat(Math.floor(60 / grapheme.length));
+    const lines = renderedLines(renderedTitle(title, 80));
+    expect(lines.length).toBeLessThanOrEqual(3);
+    expect(lines.map(line => line.text).join('')).toBe(title.toUpperCase());
+    for (const line of lines) {
+      expect(line.text.split(grapheme.toUpperCase()).join('')).toBe('');
+    }
+  });
+  it.each(['W', '界'])('constrains wide %s headings to their allocated text area', character => {
+    const lines = renderedLines(renderedTitle(character.repeat(60), 160));
+    expect(lines).toHaveLength(3);
+    for (const line of lines) {
+      expect(line.attributes).toContain('textLength="122"');
+      expect(line.attributes).toContain('lengthAdjust="spacingAndGlyphs"');
+    }
+  });
+  it('leaves ordinary short headings at their natural width', () => {
+    const lines = renderedLines(renderedTitle('Income', 220));
+    expect(lines).toHaveLength(1);
+    expect(lines[0].text).toBe('INCOME');
+    expect(lines[0].attributes).not.toContain('textLength');
+    expect(lines[0].attributes).not.toContain('lengthAdjust');
+  });
+});
 
 describe('consistent column titles', () => {
   it.each(['budget', 'business', 'jobs'] as const)('renders an editable title for every %s column', kind => {

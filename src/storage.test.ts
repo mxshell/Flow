@@ -42,7 +42,7 @@ describe('saved diagram recovery', () => {
   it('does not allow autosave to overwrite data when its backup fails', () => {
     const setItem = vi.fn(() => { throw new Error('quota'); });
     const removeItem = vi.fn();
-    vi.stubGlobal('localStorage', { getItem: () => '{broken', setItem, removeItem });
+    vi.stubGlobal('localStorage', { getItem: (key: string) => key.endsWith('-recovery') ? null : '{broken', setItem, removeItem });
     const recovered = loadLibrary();
     expect(recovered.blockSave).toBe(true);
     setItem.mockClear();
@@ -50,6 +50,40 @@ describe('saved diagram recovery', () => {
     expect(() => saveLibrary({ ...recovered, activeId: '', docs: [] })).toThrow('could not be backed up');
     expect(setItem).not.toHaveBeenCalled();
     expect(removeItem).not.toHaveBeenCalled();
+  });
+  it('keeps readable diagrams available when backing up damaged entries fails', () => {
+    const doc = template('jobs');
+    const original = JSON.stringify({ activeId: doc.id, docs: [doc, { version: 98 }] });
+    const setItem = vi.fn(() => { throw new Error('quota'); });
+    vi.stubGlobal('localStorage', { getItem: (key: string) => key.endsWith('-recovery') ? null : original, setItem });
+    const recovered = loadLibrary();
+    expect(recovered.docs).toEqual([doc]);
+    expect(recovered.activeId).toBe(doc.id);
+    expect(recovered.blockSave).toBe(true);
+    expect(recovered.recovery).toContain('could not be opened or backed up');
+    expect(() => saveLibrary(recovered)).toThrow('could not be backed up');
+  });
+  it('preserves both the older recovery copy and newly damaged storage', () => {
+    const doc = template('jobs');
+    const original = JSON.stringify({ activeId: doc.id, docs: [doc, { version: 98 }] });
+    const values = storage(original);
+    values.set('sankey-studio-v1-recovery', '{older damaged library');
+    const recovered = loadLibrary();
+    expect(recovered.docs).toEqual([doc]);
+    expect(recovered.blockSave).toBe(true);
+    expect(() => saveLibrary(recovered)).toThrow('could not be backed up');
+    expect(values.get('sankey-studio-v1')).toBe(original);
+    expect(values.get('sankey-studio-v1-recovery')).toBe('{older damaged library');
+  });
+  it('reuses an identical recovery copy without requiring another storage write', () => {
+    const doc = template('jobs');
+    const original = JSON.stringify({ activeId: doc.id, docs: [doc, { version: 98 }] });
+    const setItem = vi.fn(() => { throw new Error('quota'); });
+    vi.stubGlobal('localStorage', { getItem: () => original, setItem });
+    const recovered = loadLibrary();
+    expect(recovered.docs).toEqual([doc]);
+    expect(recovered.blockSave).not.toBe(true);
+    expect(setItem).not.toHaveBeenCalled();
   });
   it.each(['{broken', JSON.stringify({ docs: [{ version: 98 }] }), JSON.stringify({ docs: 'invalid' })])('preserves unreadable data and opens a usable fallback', (original) => {
     const values = storage(original);
@@ -101,6 +135,19 @@ describe('saved diagram deletion', () => {
 });
 
 describe('library persistence', () => {
+  it('repairs duplicate document IDs so editing and deletion target one diagram', () => {
+    const first = template('budget');
+    const second = { ...template('jobs'), id: first.id };
+    storage(JSON.stringify({ activeId: first.id, docs: [first, second] }));
+    const loaded = loadLibrary();
+    expect(loaded.activeId).toBe(first.id);
+    expect(loaded.docs[0]).toEqual(first);
+    expect(loaded.docs[1].id).not.toBe(first.id);
+    expect(loaded.docs[1].flows).toEqual(second.flows);
+    expect(removeDiagram(loaded, first.id).docs).toEqual([loaded.docs[1]]);
+    saveLibrary(loaded);
+    expect(loadLibrary()).toEqual(loaded);
+  });
   it.each([undefined, JSON.stringify({ docs: [], activeId: 'old-id' })])('opens missing or explicitly empty storage without creating a saved example', (initial) => {
     storage(initial);
     expect(loadLibrary()).toEqual({ docs: [], activeId: '' });

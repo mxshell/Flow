@@ -1,4 +1,4 @@
-import { parseDocument, template } from "./model";
+import { parseDocument, template, uid } from "./model";
 import type { Diagram } from "./model";
 
 export const STORAGE_KEY = "sankey-studio-v1";
@@ -11,9 +11,23 @@ export type Library = {
     blockSave?: boolean;
 };
 
-export function loadLibrary(): Library {
+function preserveRecovery(raw: string): boolean {
     try {
-        const raw = localStorage.getItem(STORAGE_KEY);
+        const previous = localStorage.getItem(RECOVERY_KEY);
+        // Keep an older recovery copy and the current main copy until the user
+        // can export their work, rather than replacing either damaged library.
+        if (previous !== null && previous !== raw) return false;
+        if (previous === null) localStorage.setItem(RECOVERY_KEY, raw);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+export function loadLibrary(): Library {
+    let raw: string | null = null;
+    try {
+        raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return { activeId: "", docs: [] };
 
         const saved = JSON.parse(raw);
@@ -22,16 +36,20 @@ export function loadLibrary(): Library {
         if (!saved.docs.length) return { activeId: "", docs: [] };
 
         const docs: Diagram[] = [];
+        const ids = new Set<string>();
         let damaged = false;
         for (const entry of saved.docs) {
             try {
-                docs.push(parseDocument(entry));
+                const doc = parseDocument(entry);
+                if (ids.has(doc.id)) doc.id = uid();
+                ids.add(doc.id);
+                docs.push(doc);
             } catch {
                 damaged = true;
             }
         }
-        if (damaged) localStorage.setItem(RECOVERY_KEY, raw);
         if (!docs.length) throw new Error("No readable diagrams");
+        const blockSave = damaged && !preserveRecovery(raw);
 
         return {
             docs,
@@ -39,17 +57,14 @@ export function loadLibrary(): Library {
                 ? saved.activeId
                 : docs[0].id,
             recovery: damaged
-                ? "Some saved diagrams could not be opened. Your original data is preserved in browser storage."
+                ? blockSave
+                    ? "Some saved diagrams could not be opened or backed up. Export your work to keep a copy."
+                    : "Some saved diagrams could not be opened. Your original data is preserved in browser storage."
                 : undefined,
+            ...(blockSave ? { blockSave: true } : {}),
         };
     } catch {
-        let blockSave = false;
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            if (raw) localStorage.setItem(RECOVERY_KEY, raw);
-        } catch {
-            blockSave = true;
-        }
+        const blockSave = raw === null || !preserveRecovery(raw);
         const doc = template("budget");
         return {
             activeId: doc.id,

@@ -25,7 +25,16 @@ export function buildLayout(doc: Diagram, availableWidth = 1000) {
   const height = Math.max(590, Math.max(...columns.values()) * 62 + 150);
   const width = Math.max(760, availableWidth, maxDepth * 220 + 340);
   const layout = sankey<NodeData, LinkData>().nodeId(n => n.name).nodeAlign(sankeyLeft).nodeWidth(doc.appearance.nodeWidth).nodePadding(32).nodeSort(null).iterations(48).extent([[155, 100], [width - 195, height - 60]]);
-  const graph = layout({ nodes: data.nodes.map((n, i) => ({ ...n, color: nodeColor(n.name, i, doc.appearance.palette) })), links: data.links.map(l => ({ ...l })) });
+  // D3 divides available height by flow totals. Subnormal amounts can otherwise
+  // produce Infinity/NaN even though every entered amount is finite and valid.
+  const valueScale = Math.max(...data.links.map(link => link.value));
+  const graph = layout({
+    nodes: data.nodes.map((n, i) => ({ ...n, color: nodeColor(n.name, i, doc.appearance.palette) })),
+    links: data.links.map(link => ({ ...link, value: Math.max(Number.MIN_VALUE, link.value / valueScale) })),
+  });
+  // Scaling is only for geometry; labels, tooltips, and exports retain exact values.
+  graph.nodes.forEach(node => { node.value = Math.max(node.incoming, node.outgoing); });
+  graph.links.forEach((link, index) => { link.value = data.links[index].value; });
   const headings = [...new Map(graph.nodes.map(n => [n.depth!, { depth: n.depth!, x: (n.x0! + n.x1!) / 2 }])).values()].sort((a, b) => a.depth - b.depth);
   return { graph, width, height, maxDepth, headings };
 }

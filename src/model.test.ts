@@ -38,6 +38,11 @@ describe('flow analysis', () => {
     expect(result.errors).toEqual([]);
     expect(result.balances.map(n => n.name)).toEqual(['B']);
   });
+  it('detects proportional imbalances for small fractional amounts', () => {
+    const result = analyze(flows([['A', 'B', 1e-10], ['B', 'C', 2e-10]]));
+    expect(result.balances.map(n => n.name)).toEqual(['B']);
+    expect(analyze(flows([['A', 'B', 1e-10], ['C', 'B', 2e-10], ['B', 'D', 3e-10]])).balances).toEqual([]);
+  });
 });
 
 describe('number formats and saved-data compatibility', () => {
@@ -84,6 +89,16 @@ describe('number formats and saved-data compatibility', () => {
     expect(doc.numberFormat).toBe('decimal');
     expect(doc.currency).toBe('USD');
   });
+  it('ignores structured metadata without rejecting otherwise valid diagram data', () => {
+    const source = template('budget');
+    const invalidOption = { toString: null };
+    const doc = parseDocument({ ...source, numberFormat: invalidOption, kind: invalidOption, appearance: { palette: invalidOption } });
+    expect(doc.numberFormat).toBe('decimal');
+    expect(doc.kind).toBe('custom');
+    expect(doc.appearance).toEqual(appearance);
+    expect(doc.flows).toEqual(source.flows);
+    expect(parseDocument({ ...source, appearance: { palette: ['ocean'] } }).appearance.palette).toBe('original');
+  });
 });
 
 describe('layout and file safety', () => {
@@ -111,6 +126,23 @@ describe('layout and file safety', () => {
     expect(() => parseDocument({ version: 2, flows: [] })).toThrow();
     expect(() => parseDocument({ ...template('budget'), flows: [{ from: 'A', to: 'B', amount: '5' }] })).toThrow();
     expect(() => parseDocument({ ...template('budget'), flows: flows([['A', 'B', 2], ['B', 'A', 2]]) })).toThrow();
+  });
+  it('preserves valid flow identities across saved-file round trips', () => {
+    const doc = template('budget');
+    expect(parseDocument(JSON.parse(JSON.stringify(doc))).flows).toEqual(doc.flows);
+  });
+  it('repairs blank and duplicate identities without losing flows', () => {
+    const source = template('budget');
+    source.id = '  ';
+    source.flows[1].id = source.flows[0].id;
+    source.flows[2].id = '';
+    const parsed = parseDocument(source);
+    expect(parsed.id.trim()).not.toBe('');
+    expect(parsed.flows[0].id).toBe(source.flows[0].id);
+    expect(new Set(parsed.flows.map(f => f.id)).size).toBe(source.flows.length);
+    expect(parsed.flows.every(f => f.id.trim())).toBe(true);
+    expect(parsed.flows.map(({ from, to, amount }) => [from, to, amount]))
+      .toEqual(source.flows.map(({ from, to, amount }) => [from, to, amount]));
   });
   it('normalizes unsafe appearance settings on import', () => {
     const doc = parseDocument({ ...template('budget'), appearance: { palette: '__proto__', opacity: Infinity, nodeWidth: -50 } });

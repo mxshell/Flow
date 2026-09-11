@@ -36,6 +36,7 @@ import {
 import SankeyChart from "./SankeyChart";
 import NodeCombobox from "./NodeCombobox";
 import type { NodeChoice } from "./NodeCombobox";
+import { exportSvg, pngDimensions } from "./imageExport";
 import {
     analyze,
     appearance,
@@ -299,10 +300,13 @@ export default function App() {
         [focusMode, setFocusMode] = useState(false),
         [editorOpen, setEditorOpen] = useState(true);
     const [renaming, setRenaming] = useState(false);
+    const titleComposing = useRef(false);
+    const [editorRevision, setEditorRevision] = useState(0);
     const [confirmation, setConfirmation] = useState<{ kind: "delete"; id: string } | { kind: "clear" } | null>(null);
     const [deleteError, setDeleteError] = useState("");
     const [libraryMessage, setLibraryMessage] = useState("");
     const importGeneration = useRef(0);
+    const exportGeneration = useRef(0);
     const externallyLoadedLibrary = useRef<Library | null>(null);
     const importRef = useRef<HTMLInputElement>(null);
     const titleRef = useRef<HTMLInputElement>(null);
@@ -332,7 +336,9 @@ export default function App() {
             const next = loadLibrary();
             externallyLoadedLibrary.current = next;
             importGeneration.current++;
+            exportGeneration.current++;
             setLibrary(next);
+            setEditorRevision(revision => revision + 1);
             setPast([]);
             setFuture([]);
             setSelected(null);
@@ -368,12 +374,14 @@ export default function App() {
     }, [adding]);
     useEffect(() => {
         if (renaming) {
+            titleComposing.current = false;
             titleRef.current?.focus();
             titleRef.current?.select();
         }
     }, [renaming]);
     useEffect(() => {
         function escape(e: KeyboardEvent) {
+            if (e.isComposing || e.keyCode === 229 || (e.target as HTMLElement).closest("dialog")) return;
             if (e.key === "Escape") {
                 setMenu(null);
                 setSelected(null);
@@ -411,6 +419,7 @@ export default function App() {
     }
     useEffect(() => {
         function shortcut(e: KeyboardEvent) {
+            if (modal || confirmation || e.isComposing) return;
             if (
                 (e.target as HTMLElement).closest(
                     "input,textarea,select,[contenteditable]",
@@ -486,6 +495,7 @@ export default function App() {
         }
         if (clearing || next.activeId !== library.activeId) {
             importGeneration.current++;
+            exportGeneration.current++;
             setPast([]);
             setFuture([]);
             setSelected(null);
@@ -564,6 +574,8 @@ export default function App() {
         setMenu(null);
     }
     async function exportFile(type: "json" | "svg" | "png") {
+        const generation = ++exportGeneration.current;
+        setMenu(null);
         if (type === "json") {
             download(
                 new Blob([JSON.stringify(doc, null, 2)], {
@@ -579,32 +591,15 @@ export default function App() {
             setToast("Add a flow before exporting an image.");
             return;
         }
-        const svg = source.cloneNode(true) as SVGElement;
-        svg.querySelector(".chart-tooltip")?.remove();
-        svg.querySelectorAll("[data-export-omit]").forEach(element => element.remove());
-        svg.querySelectorAll(".column-title-text").forEach(element => element.setAttribute("opacity", "1"));
-        svg.querySelectorAll(".sankey-node rect").forEach((n) =>
-            n.setAttribute("stroke", "none"),
-        );
-        svg.querySelectorAll(".sankey-link").forEach((l) =>
-            l.setAttribute("opacity", String(doc.appearance.opacity)),
-        );
+        const svg = exportSvg(source as unknown as SVGSVGElement, doc.title, doc.appearance.opacity);
         const bounds = (source as unknown as SVGSVGElement).viewBox.baseVal;
         const exportWidth = bounds.width,
             exportHeight = bounds.height;
-        svg.setAttribute("width", String(exportWidth));
-        svg.setAttribute("height", String(exportHeight));
-        svg.style.fontFamily = "Arial, sans-serif";
-        svg.style.minWidth = "";
-        svg.style.minHeight = "";
-        const rect = document.createElementNS(
-            "http://www.w3.org/2000/svg",
-            "rect",
-        );
-        rect.setAttribute("width", String(exportWidth));
-        rect.setAttribute("height", String(exportHeight));
-        rect.setAttribute("fill", "white");
-        svg.prepend(rect);
+        const pixelSize = pngDimensions(exportWidth, exportHeight);
+        if (type === "png") {
+            svg.setAttribute("width", String(pixelSize.width));
+            svg.setAttribute("height", String(pixelSize.height));
+        }
         const blob = new Blob([new XMLSerializer().serializeToString(svg)], {
             type: "image/svg+xml;charset=utf-8",
         });
@@ -618,14 +613,10 @@ export default function App() {
             const img = new window.Image();
             img.src = url;
             await img.decode();
+            if (generation !== exportGeneration.current) return;
             const canvas = document.createElement("canvas");
-            const scale = Math.min(
-                2.4,
-                8192 / exportWidth,
-                8192 / exportHeight,
-            );
-            canvas.width = Math.round(exportWidth * scale);
-            canvas.height = Math.round(exportHeight * scale);
+            canvas.width = pixelSize.width;
+            canvas.height = pixelSize.height;
             const ctx = canvas.getContext("2d");
             if (!ctx) throw new Error("Image export unavailable");
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -633,9 +624,11 @@ export default function App() {
                 canvas.toBlob(resolve, "image/png"),
             );
             if (!png) throw new Error("Image export unavailable");
+            if (generation !== exportGeneration.current) return;
             download(png, "png");
             setToast("Diagram exported as PNG");
         } catch {
+            if (generation !== exportGeneration.current) return;
             setToast("PNG export failed. Try downloading SVG instead.");
         } finally {
             URL.revokeObjectURL(url);
@@ -643,11 +636,12 @@ export default function App() {
     }
     async function importFile(file?: File) {
         if (!file) return;
+        const generation = ++importGeneration.current;
         if (file.size > 2_000_000) {
             setToast("Choose a JSON file smaller than 2 MB.");
+            if (importRef.current) importRef.current.value = "";
             return;
         }
-        const generation = importGeneration.current;
         try {
             const text = await file.text();
             if (generation !== importGeneration.current) return;
@@ -655,11 +649,13 @@ export default function App() {
             addDocument({ ...next, id: uid() });
             setToast("Diagram imported");
         } catch (e) {
+            if (generation !== importGeneration.current) return;
             setToast(
                 e instanceof Error ? e.message : "Unable to read this diagram.",
             );
+        } finally {
+            if (generation === importGeneration.current && importRef.current) importRef.current.value = "";
         }
-        if (importRef.current) importRef.current.value = "";
     }
     return (
         <div className={`app ${focusMode ? "focus-mode" : ""}`}>
@@ -713,7 +709,10 @@ export default function App() {
                                     aria-label="Diagram title"
                                     defaultValue={doc.title}
                                     maxLength={100}
+                                    onCompositionStart={() => { titleComposing.current = true; }}
+                                    onCompositionEnd={() => { titleComposing.current = false; }}
                                     onBlur={(e) => {
+                                        titleComposing.current = false;
                                         update({
                                             ...doc,
                                             title:
@@ -723,9 +722,14 @@ export default function App() {
                                         setRenaming(false);
                                     }}
                                     onKeyDown={(e) => {
+                                        if (titleComposing.current || e.nativeEvent.isComposing || e.keyCode === 229) {
+                                            e.stopPropagation();
+                                            return;
+                                        }
                                         if (e.key === "Enter")
                                             e.currentTarget.blur();
                                         if (e.key === "Escape") {
+                                            e.stopPropagation();
                                             e.currentTarget.value = doc.title;
                                             e.currentTarget.blur();
                                         }
@@ -917,6 +921,7 @@ export default function App() {
                                     }}
                                 >
                                     <SankeyChart
+                                        key={`${doc.id}:${editorRevision}`}
                                         doc={doc}
                                         selected={selected}
                                         onSelect={setSelected}
@@ -1076,7 +1081,7 @@ export default function App() {
                                         </div>
                                         {doc.flows.map((f) => (
                                             <FlowRow
-                                                key={f.id}
+                                                key={`${doc.id}:${editorRevision}:${f.id}`}
                                                 flow={f}
                                                 nodes={nodeChoices}
                                                 amountLabel={doc.numberFormat === "integer" ? "Count" : "Amount"}
@@ -1562,7 +1567,7 @@ export default function App() {
                                         addDocument({
                                             ...structuredClone(d),
                                             id: uid(),
-                                            title: `${d.title} (copy)`,
+                                            title: `${d.title.slice(0, 93)} (copy)`,
                                         });
                                         setToast("Diagram duplicated");
                                     }}

@@ -44,27 +44,27 @@ export const appearance: Appearance = { palette: 'original', labels: true, value
 export const uid = () => crypto.randomUUID();
 const rows = (data: [string, string, number][]): Flow[] => data.map(([from, to, amount]) => ({ id: uid(), from, to, amount }));
 export function template(kind: 'budget' | 'business' | 'jobs'): Diagram {
-  const examples = {
-    budget: { title: 'My monthly budget', numberFormat: 'currency' as const, flows: rows([
+  const examples: Record<typeof kind, { title: string; numberFormat: NumberFormat; flows: [string, string, number][] }> = {
+    budget: { title: 'My monthly budget', numberFormat: 'currency', flows: [
       ['Salary', 'Total income', 5200], ['Freelance', 'Total income', 800],
       ['Total income', 'Housing', 1800], ['Total income', 'Living expenses', 1200],
       ['Total income', 'Savings', 1500], ['Total income', 'Food & dining', 700],
       ['Total income', 'Transport', 400], ['Total income', 'A little fun', 400],
-    ]) },
-    business: { title: 'Company profit & loss', numberFormat: 'currency' as const, flows: rows([
+    ] },
+    business: { title: 'Company profit & loss', numberFormat: 'currency', flows: [
       ['Product sales', 'Revenue', 840000], ['Services', 'Revenue', 360000],
       ['Revenue', 'Cost of sales', 420000], ['Revenue', 'Gross profit', 780000],
       ['Gross profit', 'Operating costs', 480000], ['Gross profit', 'Operating profit', 300000],
       ['Operating profit', 'Taxes', 60000], ['Operating profit', 'Net profit', 240000],
-    ]) },
-    jobs: { title: 'My job search', numberFormat: 'integer' as const, flows: rows([
+    ] },
+    jobs: { title: 'My job search', numberFormat: 'integer', flows: [
       ['Applications', 'No response', 50], ['Applications', 'Not shortlisted', 25], ['Applications', 'Shortlisted', 25],
       ['Shortlisted', 'Interviews', 20], ['Shortlisted', 'Withdrawn', 5],
       ['Interviews', 'Not selected', 12], ['Interviews', 'Offers', 8],
       ['Offers', 'Declined', 5], ['Offers', 'Accepted', 3],
-    ]) },
+    ] },
   };
-  return { version: 2, id: uid(), kind, currency: 'USD', columnTitles: defaultColumnTitles(kind), ...examples[kind], appearance: { ...appearance } };
+  return { version: 2, id: uid(), kind, currency: 'USD', columnTitles: defaultColumnTitles(kind), ...examples[kind], flows: rows(examples[kind].flows), appearance: { ...appearance } };
 }
 
 export function analyze(flows: Flow[]) {
@@ -96,7 +96,7 @@ export function analyze(flows: Flow[]) {
     visiting.delete(name); visited.add(name); return false;
   }
   if ([...nodes.keys()].some(cycle)) errors.push('This connection creates a loop. Flows must move forward, without returning to an earlier step.');
-  const balances = [...nodes.values()].filter(n => n.incoming > 0 && n.outgoing > 0 && Math.abs(n.incoming - n.outgoing) > 1e-9 * Math.max(1, n.incoming, n.outgoing));
+  const balances = [...nodes.values()].filter(n => n.incoming > 0 && n.outgoing > 0 && Math.abs(n.incoming - n.outgoing) > 1e-9 * Math.max(n.incoming, n.outgoing));
   return { nodes: [...nodes.values()], links: [...edges.values()], errors: [...new Set(errors)], balances, total: [...nodes.values()].filter(n => n.incoming === 0).reduce((s, n) => s + n.outgoing, 0) };
 }
 
@@ -156,22 +156,25 @@ export function parseDocument(raw: unknown): Diagram {
   const isCurrency = (value: unknown): value is Currency => currencies.some(c => c.code === value);
   const numberFormat: NumberFormat = d.version === 1
     ? isCurrency(d.unit) ? 'currency' : d.unit === 'applications' ? 'integer' : 'decimal'
-    : ['currency', 'decimal', 'integer'].includes(String(d.numberFormat)) ? d.numberFormat as NumberFormat : 'decimal';
+    : typeof d.numberFormat === 'string' && ['currency', 'decimal', 'integer'].includes(d.numberFormat) ? d.numberFormat as NumberFormat : 'decimal';
   const currency: Currency = d.version === 1 && isCurrency(d.unit) ? d.unit : isCurrency(d.currency) ? d.currency : 'USD';
+  const flowIds = new Set<string>();
   const flows = d.flows.map((f: unknown) => {
     if (!f || typeof f !== 'object') throw new Error('Every flow needs From, To, and Amount values.');
     const r = f as Record<string, unknown>;
     if (typeof r.from !== 'string' || typeof r.to !== 'string' || typeof r.amount !== 'number') throw new Error('Every flow needs From, To, and a numeric Amount.');
-    return { id: uid(), from: r.from.trim(), to: r.to.trim(), amount: r.amount };
+    const id = typeof r.id === 'string' && r.id.trim() && !flowIds.has(r.id) ? r.id : uid();
+    flowIds.add(id);
+    return { id, from: r.from.trim(), to: r.to.trim(), amount: r.amount };
   });
   const result = analyze(flows);
   if (result.errors.length) throw new Error(result.errors[0]);
   const a = (d.appearance ?? {}) as Partial<Appearance>;
-  const kind: Diagram['kind'] = ['budget', 'business', 'jobs'].includes(String(d.kind)) ? d.kind as Diagram['kind'] : 'custom';
+  const kind: Diagram['kind'] = typeof d.kind === 'string' && ['budget', 'business', 'jobs'].includes(d.kind) ? d.kind as Diagram['kind'] : 'custom';
   // Preserve slots and hidden columns so edits survive a temporarily shorter graph.
   const columnTitles = Array.isArray(d.columnTitles)
     ? d.columnTitles.slice(0, 301).map(title => typeof title === 'string' ? cleanColumnTitle(title) : '')
     : defaultColumnTitles(kind);
-  return { version: 2, id: typeof d.id === 'string' ? d.id : uid(), title: d.title.slice(0, 100) || 'Untitled diagram', columnTitles, numberFormat, currency, kind, flows,
-    appearance: { palette: a.palette && Object.hasOwn(palettes, a.palette) ? a.palette : 'original', labels: typeof a.labels === 'boolean' ? a.labels : true, values: typeof a.values === 'boolean' ? a.values : true, opacity: typeof a.opacity === 'number' && a.opacity >= 0.1 && a.opacity <= 0.8 ? a.opacity : 0.34, nodeWidth: typeof a.nodeWidth === 'number' && a.nodeWidth >= 6 && a.nodeWidth <= 28 ? a.nodeWidth : 13 } };
+  return { version: 2, id: typeof d.id === 'string' && d.id.trim() ? d.id : uid(), title: d.title.slice(0, 100) || 'Untitled diagram', columnTitles, numberFormat, currency, kind, flows,
+    appearance: { palette: typeof a.palette === 'string' && Object.hasOwn(palettes, a.palette) ? a.palette : 'original', labels: typeof a.labels === 'boolean' ? a.labels : true, values: typeof a.values === 'boolean' ? a.values : true, opacity: typeof a.opacity === 'number' && a.opacity >= 0.1 && a.opacity <= 0.8 ? a.opacity : 0.34, nodeWidth: typeof a.nodeWidth === 'number' && a.nodeWidth >= 6 && a.nodeWidth <= 28 ? a.nodeWidth : 13 } };
 }

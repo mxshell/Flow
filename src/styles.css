@@ -17,6 +17,10 @@ main{max-width:none;margin:0 auto;padding:35px 42px 0}.page-heading{display:flex
 
 .column-title-button{cursor:text;outline:none}.column-title-hit{transition:fill .15s,stroke .15s}.column-title-button:hover .column-title-hit{fill:#f0f1fb;stroke:#dfe2f2}.column-title-button:focus-visible .column-title-hit{fill:#f5f5ff;stroke:#9299f3;stroke-width:2}.column-title-pencil{color:#a2a7b5;opacity:0;transition:opacity .15s;pointer-events:none}.column-title-button:hover .column-title-pencil{color:var(--primary);opacity:1}.column-title-text{pointer-events:none}.column-title-input{display:block;width:calc(100% - 6px);height:34px;margin:3px;padding:5px 8px;border:1px solid #9c9fea;border-radius:4px;background:#fff;color:var(--ink);font-family:inherit;font-size:12px;font-weight:600;letter-spacing:1.2px;text-align:center;text-transform:uppercase;outline-offset:0}.column-title-input:focus-visible{outline:2px solid #b8bcf1;outline-offset:0}
 .node-combobox{position:relative;min-width:0;width:100%}
+.focus-mode .diagram-panel{height:100dvh;min-height:0}
+.focus-mode .canvas-area{min-height:0}
+.focus-mode .diagram-scroll{min-height:0;max-height:none}
+.focus-mode .diagram-zoom svg{max-height:none}
 .flow-row .node-combobox input{padding:6px 25px 6px 8px;border:1px solid #e7eaf2;border-radius:5px;background:#fff;color:#59657d;text-overflow:ellipsis}
 .flow-row .node-combobox input:hover{border-color:#c9cfe0}
 .flow-row .node-combobox input:focus,.add-form .node-combobox input:focus{border-color:#8e95e3;outline:2px solid #5c63d81a;outline-offset:1px}

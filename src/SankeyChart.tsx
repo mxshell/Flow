@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { sankeyLinkHorizontal } from "d3-sankey";
 import { columnTitle, formatAmount } from "./model";
 import type { Diagram } from "./model";
 import { buildLayout } from "./layout";
 import ColumnTitle from "./ColumnTitle";
+import { shortenLabel } from "./text";
 import type {
     ChartNode as Node,
     ChartLink as Link,
@@ -41,11 +42,8 @@ export default function SankeyChart({
         return () => observer.disconnect();
     }, [hasFlows]);
     const [hover, setHover] = useState<{
-        label: string;
-        value: number;
-        percent: number;
-        x: number;
-        y: number;
+        source: string;
+        target: string;
     } | null>(null);
     const result = useMemo(
         () => buildLayout(doc, availableWidth),
@@ -56,6 +54,30 @@ export default function SankeyChart({
             availableWidth,
         ],
     );
+    useLayoutEffect(() => {
+        const svg = svgRef.current;
+        if (!svg) return;
+        let mounted = true;
+        function fitLabels() {
+            if (!mounted) return;
+            svg!.querySelectorAll<SVGTextElement>("text[data-max-width]").forEach(text => {
+                text.removeAttribute("textLength");
+                text.removeAttribute("lengthAdjust");
+                const maxWidth = Number(text.dataset.maxWidth);
+                if (text.getComputedTextLength() > maxWidth) {
+                    text.setAttribute("textLength", String(maxWidth));
+                    text.setAttribute("lengthAdjust", "spacingAndGlyphs");
+                }
+            });
+        }
+        fitLabels();
+        void document.fonts.ready.then(fitLabels);
+        document.fonts.addEventListener("loadingdone", fitLabels);
+        return () => {
+            mounted = false;
+            document.fonts.removeEventListener("loadingdone", fitLabels);
+        };
+    }, [result, hover, doc.numberFormat, doc.currency, doc.appearance.labels, doc.appearance.values]);
     const path = sankeyLinkHorizontal<N, L>();
     if (!result)
         return (
@@ -75,17 +97,18 @@ export default function SankeyChart({
         !selected ||
         (link.source as Node).name === selected ||
         (link.target as Node).name === selected;
-    const showLink = (link: Link) => {
-        const s = link.source as Node,
-            t = link.target as Node;
-        setHover({
+    const hoveredLink = hover && graph.links.find(link =>
+        (link.source as Node).name === hover.source && (link.target as Node).name === hover.target);
+    const tooltip = hoveredLink ? (() => {
+        const s = hoveredLink.source as Node, t = hoveredLink.target as Node;
+        return {
             label: `${s.name} → ${t.name}`,
-            value: link.value,
-            percent: link.value / (s.value || 1),
+            value: hoveredLink.value,
+            percent: hoveredLink.value / (s.value || 1),
             x: (s.x1! + t.x0!) / 2,
-            y: Math.max(25, (link.y0! + link.y1!) / 2 - 45),
-        });
-    };
+            y: Math.max(25, (hoveredLink.y0! + hoveredLink.y1!) / 2 - 45),
+        };
+    })() : null;
     return (
         <svg
             ref={svgRef}
@@ -148,7 +171,7 @@ export default function SankeyChart({
                         strokeWidth={Math.max(1, l.width ?? 1)}
                         opacity={connected(l) ? doc.appearance.opacity : 0.07}
                         className="sankey-link"
-                        onMouseEnter={() => showLink(l)}
+                        onMouseEnter={() => setHover({ source: (l.source as Node).name, target: (l.target as Node).name })}
                         onMouseLeave={() => setHover(null)}
                         onClick={() =>
                             onSelect(
@@ -178,8 +201,9 @@ export default function SankeyChart({
                     first || last
                         ? (n.y0! + n.y1!) / 2 - (doc.appearance.values ? 5 : -5)
                         : n.y0! - (doc.appearance.values ? 29 : 12);
-                const name =
-                    n.name.length > 22 ? `${n.name.slice(0, 20)}…` : n.name;
+                const name = shortenLabel(n.name, 22);
+                const labelWidth = first ? x - 12 : last ? width - x - 12
+                    : Math.min(260, (width - 350) / Math.max(1, maxDepth) - 24);
                 return (
                     <g
                         key={n.name}
@@ -221,6 +245,7 @@ export default function SankeyChart({
                                 fill="#3a435c"
                                 fontSize="15"
                                 fontWeight="550"
+                                data-max-width={labelWidth}
                             >
                                 {name}
                             </text>
@@ -235,6 +260,7 @@ export default function SankeyChart({
                                 fill="#727c92"
                                 fontSize="14"
                                 fontWeight="450"
+                                data-max-width={labelWidth}
                             >
                                 {formatAmount(
                                     n.value ?? 0,
@@ -246,21 +272,19 @@ export default function SankeyChart({
                     </g>
                 );
             })}
-            {hover && (
+            {tooltip && (
                 <g
                     className="chart-tooltip"
                     pointerEvents="none"
-                    transform={`translate(${Math.min(width - 265, Math.max(15, hover.x - 115))},${hover.y})`}
+                    transform={`translate(${Math.min(width - 265, Math.max(15, tooltip.x - 115))},${tooltip.y})`}
                 >
                     <rect width="250" height="60" rx="9" fill="#25304b" />
-                    <text x="13" y="23" fill="white" fontSize="12">
-                        {hover.label.length > 34
-                            ? `${hover.label.slice(0, 32)}…`
-                            : hover.label}
+                    <text x="13" y="23" fill="white" fontSize="12" data-max-width="224">
+                        {shortenLabel(tooltip.label, 34)}
                     </text>
-                    <text x="13" y="44" fill="#d8deee" fontSize="12">
-                        {formatAmount(hover.value, doc)} ·{" "}
-                        {Math.round(hover.percent * 100)}% of source
+                    <text x="13" y="44" fill="#d8deee" fontSize="12" data-max-width="224">
+                        {formatAmount(tooltip.value, doc)} ·{" "}
+                        {Math.round(tooltip.percent * 100)}% of source
                     </text>
                 </g>
             )}

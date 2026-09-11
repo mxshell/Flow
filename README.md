@@ -34,7 +34,7 @@ Column titles are saved by position from left to right and included in JSON, SVG
 
 ## Privacy and backups
 
-Diagram data stays in `localStorage` on the current browser and origin. It does not synchronize between devices. Clearing browser/site data removes diagrams; use **Export → Editable diagram** for a portable backup. If saved data is malformed, readable diagrams are recovered and the original data is retained in the `sankey-studio-v1-recovery` storage key. An unavailable storage warning means you must export to keep your work.
+Diagram data stays in `localStorage` on the current browser and origin. Open tabs on the same origin receive saved changes; data does not synchronize between devices. Clearing browser/site data removes diagrams; use **Export → Editable diagram** for a portable backup. If saved data is malformed, readable diagrams are recovered and the original data is retained in the `sankey-studio-v1-recovery` storage key. If a different recovery copy already exists or a backup cannot be saved, the original storage is left untouched and automatic saving is paused. An unavailable storage warning means you must export to keep your work.
 
 ## Validation and static deployment
 
@@ -48,4 +48,4 @@ pnpm preview
 
 The production build is emitted to `dist/` and can be served by any static hosting provider.
 
-Tests cover template conservation, source totals, cycles, duplicate links, invalid input, import validation, large and deep layouts, and preservation of saved data. The production build checks TypeScript types.
+Tests cover template conservation, source totals, cycles, duplicate links, invalid input, import validation, stable saved IDs, recovery failures, searchable selector navigation, Unicode labels and headings, tiny flow values, large and deep layouts, and PNG size limits. The production build checks TypeScript types.

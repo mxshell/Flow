@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 're
 import type { Ref } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, Plus } from 'lucide-react';
-import { getNodeOptions } from './nodeOptions';
+import { getNodeOptions, optionScrollTop } from './nodeOptions';
 
 export type NodeChoice = { name: string; color: string };
 
@@ -33,14 +33,15 @@ export default function NodeCombobox({ value, onValueChange, onCommit, nodes, la
     const list = useRef<HTMLDivElement>(null);
     const valueOnOpen = useRef(value);
     const composing = useRef(false);
+    const scrollActiveOption = useRef(false);
     const [open, setOpen] = useState(false);
     const [filtering, setFiltering] = useState(false);
     const [active, setActive] = useState(-1);
     const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number; transform: string } | null>(null);
     const query = filtering ? value : '';
-    const names = useMemo(() => nodes.map(node => node.name), [nodes]);
-    const colors = useMemo(() => new Map(nodes.map(node => [node.name, node.color])), [nodes]);
-    const options = useMemo(() => getNodeOptions(names, query), [names, query]);
+    const names = useMemo(() => open ? nodes.map(node => node.name) : [], [nodes, open]);
+    const colors = useMemo(() => new Map(open ? nodes.map(node => [node.name, node.color]) : []), [nodes, open]);
+    const options = useMemo(() => open ? getNodeOptions(names, query) : [], [names, query, open]);
     const activeIndex = active >= 0 && options.length ? Math.min(active, options.length - 1) : -1;
     const existingCount = options.filter(option => option.kind === 'existing').length;
 
@@ -77,35 +78,46 @@ export default function NodeCombobox({ value, onValueChange, onCommit, nodes, la
             const upwards = below < desiredHeight && above > below;
             const maxHeight = Math.max(64, Math.min(364, upwards ? above : below));
             const panelWidth = Math.min(Math.max(rect.width, 280), width - 24);
-            setPosition({
+            const next = {
                 left: Math.max(visibleLeft + 12, Math.min(rect.left, visibleLeft + width - panelWidth - 12)),
                 top: upwards ? rect.top - 6 : rect.bottom + 6,
                 transform: upwards ? 'translateY(-100%)' : 'none',
                 width: panelWidth,
                 maxHeight,
-            });
+            };
+            setPosition(previous => previous && Object.entries(next).every(([key, value]) => previous[key as keyof typeof next] === value) ? previous : next);
         }
         place();
         const observer = new ResizeObserver(place);
         if (input.current) observer.observe(input.current);
+        observer.observe(document.body);
+        function onScroll(event: Event) {
+            if (event.target instanceof Node && popup.current?.contains(event.target)) return;
+            place();
+        }
         window.addEventListener('resize', place);
-        window.addEventListener('scroll', place, true);
+        window.addEventListener('scroll', onScroll, true);
         window.visualViewport?.addEventListener('resize', place);
         window.visualViewport?.addEventListener('scroll', place);
         return () => {
             observer.disconnect();
             window.removeEventListener('resize', place);
-            window.removeEventListener('scroll', place, true);
+            window.removeEventListener('scroll', onScroll, true);
             window.visualViewport?.removeEventListener('resize', place);
             window.visualViewport?.removeEventListener('scroll', place);
         };
     }, [open, options.length]);
 
     useEffect(() => {
-        if (open && activeIndex >= 0) {
-            list.current?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+        if (open && activeIndex >= 0 && scrollActiveOption.current) {
+            const container = list.current;
+            const option = container?.querySelector<HTMLElement>(`[data-index="${activeIndex}"]`);
+            if (!container || !option) return;
+            const containerRect = container.getBoundingClientRect();
+            const optionRect = option.getBoundingClientRect();
+            container.scrollTop = optionScrollTop(container.scrollTop, containerRect.top + container.clientTop, container.clientHeight, optionRect.top, optionRect.height);
         }
-    }, [activeIndex, open, query]);
+    }, [activeIndex, open, query, options.length, position]);
 
     return <div className={`node-combobox ${open ? 'is-open' : ''}`}>
         <input
@@ -134,6 +146,7 @@ export default function NodeCombobox({ value, onValueChange, onCommit, nodes, la
                 if (!open) valueOnOpen.current = value;
                 onValueChange(event.target.value);
                 setFiltering(true);
+                scrollActiveOption.current = true;
                 setActive(0);
                 setOpen(true);
             }}
@@ -151,13 +164,15 @@ export default function NodeCombobox({ value, onValueChange, onCommit, nodes, la
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
                     event.preventDefault();
                     event.stopPropagation();
+                    scrollActiveOption.current = true;
                     if (!open) {
                         openMenu();
-                        setActive(event.key === 'ArrowDown' ? 0 : getNodeOptions(names, '').length - 1);
+                        setActive(event.key === 'ArrowDown' ? 0 : getNodeOptions(nodes.map(node => node.name), '').length - 1);
                     } else setActive(index => event.key === 'ArrowDown'
                         ? Math.min(index + 1, options.length - 1)
                         : index < 0 ? options.length - 1 : Math.max(index - 1, 0));
                 } else if (event.key === 'Enter') {
+                    if (!open && !onCommit) return;
                     event.preventDefault();
                     event.stopPropagation();
                     accept(open && activeIndex >= 0 ? options[activeIndex].name : value);
@@ -197,7 +212,12 @@ export default function NodeCombobox({ value, onValueChange, onCommit, nodes, la
                         data-index={index}
                         aria-selected={activeIndex === index}
                         className={`node-option ${option.kind === 'create' ? 'node-option-create' : ''} ${activeIndex === index ? 'is-active' : ''}`}
-                        onPointerMove={event => { if (event.pointerType === 'mouse') setActive(index); }}
+                        onPointerMove={event => {
+                            if (event.pointerType === 'mouse') {
+                                scrollActiveOption.current = false;
+                                setActive(index);
+                            }
+                        }}
                         onClick={() => {
                             input.current?.focus({ preventScroll: true });
                             accept(option.name);

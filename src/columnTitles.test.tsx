@@ -78,7 +78,8 @@ describe('consistent column titles', () => {
         expect(nodes.length).toBeGreaterThan(0);
         for (const node of nodes) {
           expect(heading.x).toBeCloseTo((node.x0! + node.x1!) / 2);
-          expect(node.y0).toBeGreaterThanOrEqual(100);
+          // D3 relaxation may cross the bound by a floating-point rounding error.
+          expect(node.y0).toBeGreaterThanOrEqual(100 - 1e-8);
         }
       }
     }

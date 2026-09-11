@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { sankeyLinkHorizontal } from "d3-sankey";
-import { columnTitle, formatAmount } from "./model";
-import type { Diagram } from "./model";
+import { balanceDifference, columnTitle, formatAmount, formatPercentage, getPercentageReference } from "./model";
+import type { Diagram, NodeRenameResult } from "./model";
 import { buildLayout } from "./layout";
 import ColumnTitle from "./ColumnTitle";
+import NodeName from "./NodeName";
 import { shortenLabel } from "./text";
 import type {
     ChartNode as Node,
@@ -17,16 +18,21 @@ export default function SankeyChart({
     selected,
     onSelect,
     onRenameColumn,
+    onRenameNode,
+    onBalanceAction,
     zoom,
 }: {
     doc: Diagram;
     selected: string | null;
     onSelect: (name: string | null) => void;
     onRenameColumn: (depth: number, title: string) => void;
+    onRenameNode?: (oldName: string, newName: string, allowMerge?: boolean) => NodeRenameResult;
+    onBalanceAction?: (name: string) => void;
     zoom: number;
 }) {
     const svgRef = useRef<SVGSVGElement>(null);
     const [availableWidth, setAvailableWidth] = useState(1000);
+    const [editingNode, setEditingNode] = useState<string | null>(null);
     const hasFlows = doc.flows.length > 0;
     useEffect(() => {
         const container = svgRef.current?.parentElement;
@@ -51,9 +57,14 @@ export default function SankeyChart({
             doc.flows,
             doc.appearance.nodeWidth,
             doc.appearance.palette,
+            doc.appearance.values,
+            doc.appearance.valueDisplay,
             availableWidth,
         ],
     );
+    const percentageReference = useMemo(() => getPercentageReference(doc), [doc.flows, doc.appearance.percentageBase]);
+    const displayMode = doc.appearance.valueDisplay ?? "values";
+    const showPercentages = doc.appearance.values && displayMode !== "values";
     useLayoutEffect(() => {
         const svg = svgRef.current;
         if (!svg) return;
@@ -77,7 +88,7 @@ export default function SankeyChart({
             mounted = false;
             document.fonts.removeEventListener("loadingdone", fitLabels);
         };
-    }, [result, hover, doc.numberFormat, doc.currency, doc.appearance.labels, doc.appearance.values]);
+    }, [result, hover, doc.numberFormat, doc.currency, doc.appearance.labels, doc.appearance.values, displayMode, percentageReference]);
     const path = sankeyLinkHorizontal<N, L>();
     if (!result)
         return (
@@ -104,7 +115,8 @@ export default function SankeyChart({
         return {
             label: `${s.name} → ${t.name}`,
             value: hoveredLink.value,
-            percent: hoveredLink.value / (s.value || 1),
+            percentage: formatPercentage(hoveredLink.value, showPercentages ? percentageReference.value : s.outgoing),
+            baseName: showPercentages ? percentageReference.name : s.name,
             x: (s.x1! + t.x0!) / 2,
             y: Math.max(25, (hoveredLink.y0! + hoveredLink.y1!) / 2 - 45),
         };
@@ -189,90 +201,102 @@ export default function SankeyChart({
                     </path>
                 ))}
             </g>
-            {graph.nodes.map((n) => {
+            {[...graph.nodes].sort((a, b) => Number(a.name === editingNode) - Number(b.name === editingNode)).map((n) => {
                 const first = n.depth === 0,
                     last = (n.sourceLinks?.length ?? 0) === 0;
-                const x = first
-                    ? n.x0! - 12
-                    : last
-                      ? n.x1! + 12
-                      : n.x0! + (n.x1! - n.x0!) / 2;
-                const y =
-                    first || last
-                        ? (n.y0! + n.y1!) / 2 - (doc.appearance.values ? 5 : -5)
-                        : n.y0! - (doc.appearance.values ? 29 : 12);
-                const name = shortenLabel(n.name, 22);
+                const x = first ? n.x0! - 12 : last ? n.x1! + 12 : (n.x0! + n.x1!) / 2;
+                const anchor = first ? "end" : last ? "start" : "middle";
+                const amount = n.incoming > 0 ? n.incoming : n.outgoing;
+                const numbers = !doc.appearance.values ? [] : displayMode === "percentages"
+                    ? [formatPercentage(amount, percentageReference.value)]
+                    : displayMode === "both"
+                      ? [formatAmount(amount, doc, (n.depth ?? 0) > 0 && maxDepth > 3), formatPercentage(amount, percentageReference.value)]
+                      : [formatAmount(amount, doc, (n.depth ?? 0) > 0 && maxDepth > 3)];
+                const difference = n.incoming > 0 && n.outgoing > 0 ? balanceDifference(n) : 0;
+                const hasBalanceAction = difference !== 0 && Boolean(onBalanceAction);
+                const lineCount = Number(doc.appearance.labels) + numbers.length + Number(hasBalanceAction);
+                const y = first || last
+                    ? (n.y0! + n.y1!) / 2 + 5 - Math.max(0, lineCount - 1) * 10
+                    : n.y0! - 10 - Math.max(0, lineCount - 1) * 20;
                 const labelWidth = first ? x - 12 : last ? width - x - 12
                     : Math.min(260, (width - 350) / Math.max(1, maxDepth) - 24);
+                const numericY = y + (doc.appearance.labels ? 20 : 0);
+                const balanceY = numericY + numbers.length * 20;
+                const balanceLabel = `${formatAmount(Math.abs(difference), doc, true)} ${difference > 0 ? "left · Add" : "over · Review"}`;
                 return (
-                    <g
-                        key={n.name}
-                        className="sankey-node"
-                        role="button"
-                        tabIndex={0}
-                        aria-label={`${n.name}, ${formatAmount(n.value ?? 0, doc)}. Highlight connected flows.`}
-                        aria-pressed={selected === n.name}
-                        onClick={() =>
-                            onSelect(selected === n.name ? null : n.name)
-                        }
-                        onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                                e.preventDefault();
-                                onSelect(selected === n.name ? null : n.name);
-                            }
-                        }}
-                    >
-                        <title>
-                            {n.name}: {formatAmount(n.value ?? 0, doc)}
-                        </title>
-                        <rect
-                            x={n.x0}
-                            y={n.y0}
-                            width={n.x1! - n.x0!}
-                            height={Math.max(2, n.y1! - n.y0!)}
-                            fill={n.color}
-                            rx="3"
-                            stroke={selected === n.name ? "#253359" : "none"}
-                            strokeWidth="2"
-                        />
-                        {doc.appearance.labels && (
-                            <text
-                                x={x}
-                                y={y}
-                                textAnchor={
-                                    first ? "end" : last ? "start" : "middle"
+                    <g key={n.name} className="sankey-node">
+                        <g
+                            className="node-select"
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`${n.name}, ${formatAmount(amount, doc)}${showPercentages ? `, ${formatPercentage(amount, percentageReference.value)} of ${percentageReference.name}` : ""}. Highlight connected flows.`}
+                            aria-pressed={selected === n.name}
+                            onClick={() => onSelect(selected === n.name ? null : n.name)}
+                            onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    onSelect(selected === n.name ? null : n.name);
                                 }
-                                fill="#3a435c"
-                                fontSize="15"
-                                fontWeight="550"
-                                data-max-width={labelWidth}
-                            >
-                                {name}
+                            }}
+                        >
+                            <title>{n.name}: {formatAmount(amount, doc)}</title>
+                            <rect
+                                x={n.x0} y={n.y0}
+                                width={n.x1! - n.x0!}
+                                height={Math.max(2, n.y1! - n.y0!)}
+                                fill={n.color} rx="3"
+                                stroke={selected === n.name ? "#253359" : "none"}
+                                strokeWidth="2"
+                            />
+                        </g>
+                        {numbers.map((number, index) => (
+                            <text key={index} x={x} y={numericY + index * 20} textAnchor={anchor}
+                                fill="#727c92" fontSize="14" fontWeight="450" data-max-width={labelWidth}>
+                                {number}
                             </text>
+                        ))}
+                        {hasBalanceAction && (
+                            <g role="button" tabIndex={0} className="node-balance-action" data-export-omit="true"
+                                aria-label={`${difference > 0 ? "Add remaining flow from" : "Review flows for"} ${n.name}: ${formatAmount(Math.abs(difference), doc)} ${difference > 0 ? "left to allocate" : "more out than in"}`}
+                                onClick={() => onBalanceAction?.(n.name)}
+                                onKeyDown={event => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                        event.preventDefault();
+                                        onBalanceAction?.(n.name);
+                                    }
+                                }}>
+                                <rect x={anchor === "end" ? x - labelWidth : anchor === "middle" ? x - labelWidth / 2 : x}
+                                    y={balanceY - 14} width={labelWidth} height={24} fill="transparent" />
+                                <text x={x} y={balanceY} textAnchor={anchor} fill="#a16b28" fontSize="12" fontWeight="500" data-max-width={labelWidth}>
+                                    {balanceLabel}
+                                </text>
+                            </g>
                         )}
-                        {doc.appearance.values && (
-                            <text
-                                x={x}
-                                y={doc.appearance.labels ? y + 20 : y + 9}
-                                textAnchor={
-                                    first ? "end" : last ? "start" : "middle"
-                                }
-                                fill="#727c92"
-                                fontSize="14"
-                                fontWeight="450"
-                                data-max-width={labelWidth}
-                            >
-                                {formatAmount(
-                                    n.value ?? 0,
-                                    doc,
-                                    (n.depth ?? 0) > 0 && maxDepth > 3,
-                                )}
+                        {doc.appearance.labels && (onRenameNode ? (
+                            <NodeName
+                                name={n.name} x={x} y={y} width={labelWidth} anchor={anchor}
+                                canvasWidth={width} canvasHeight={height}
+                                onRename={(name, allowMerge) => onRenameNode(n.name, name, allowMerge)}
+                                onEditingChange={editing => {
+                                    setEditingNode(editing ? n.name : null);
+                                    if (editing) setHover(null);
+                                }}
+                            />
+                        ) : (
+                            <text x={x} y={y} textAnchor={anchor} fill="#3a435c" fontSize="15" fontWeight="550" data-max-width={labelWidth}>
+                                {shortenLabel(n.name, 22)}
                             </text>
-                        )}
+                        ))}
                     </g>
                 );
             })}
-            {tooltip && (
+            {showPercentages && (
+                <text className="percentage-reference" x={width / 2} y={height - 18} textAnchor="middle"
+                    fill="#727c92" fontSize="12" data-max-width={width - 40}>
+                    Percentages of {percentageReference.name} ({formatAmount(percentageReference.value, doc)})
+                </text>
+            )}
+            {tooltip && !editingNode && (
                 <g
                     className="chart-tooltip"
                     pointerEvents="none"
@@ -284,7 +308,7 @@ export default function SankeyChart({
                     </text>
                     <text x="13" y="44" fill="#d8deee" fontSize="12" data-max-width="224">
                         {formatAmount(tooltip.value, doc)} ·{" "}
-                        {Math.round(tooltip.percent * 100)}% of source
+                        {tooltip.percentage} of {tooltip.baseName}
                     </text>
                 </g>
             )}

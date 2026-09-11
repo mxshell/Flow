@@ -40,14 +40,17 @@ import { exportSvg, pngDimensions } from "./imageExport";
 import {
     analyze,
     appearance,
+    balanceDifference,
     currencies,
     defaultNumberSettings,
     formatAmount,
+    getPercentageReference,
     numberFormatLabel,
     nodeColor,
     palettes,
     parseDocument,
     renameColumn,
+    renameNode,
     template,
     uid,
 } from "./model";
@@ -227,6 +230,8 @@ function FlowRow({
     return (
         <div
             ref={rowRef}
+            data-flow-from={flow.from}
+            data-flow-to={flow.to}
             className={`flow-row-wrap ${selected ? "selected" : ""} ${error ? "invalid" : ""}`}
         >
             <div className="flow-row">
@@ -294,6 +299,10 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
     const [adding, setAdding] = useState(false),
         [addError, setAddError] = useState("");
     const [newFlowNames, setNewFlowNames] = useState({ from: "", to: "" });
+    const [newFlowAmount, setNewFlowAmount] = useState("");
+    const [remainingSource, setRemainingSource] = useState<string | null>(null);
+    const [editorAction, setEditorAction] = useState<{ kind: "add" | "review"; name: string; revision: number } | null>(null);
+    const editorActionRevision = useRef(0);
     const [toast, setToast] = useState(library.recovery ?? ""),
         [storageError, setStorageError] = useState(false);
     const [zoom, setZoom] = useState(100),
@@ -302,6 +311,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
     const [renaming, setRenaming] = useState(false);
     const titleComposing = useRef(false);
     const [editorRevision, setEditorRevision] = useState(0);
+    const [flowRowRevision, setFlowRowRevision] = useState(0);
     const [confirmation, setConfirmation] = useState<{ kind: "delete"; id: string } | { kind: "clear" } | null>(null);
     const [deleteError, setDeleteError] = useState("");
     const [libraryMessage, setLibraryMessage] = useState("");
@@ -311,7 +321,14 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
     const importRef = useRef<HTMLInputElement>(null);
     const titleRef = useRef<HTMLInputElement>(null);
     const firstAddRef = useRef<HTMLInputElement>(null);
+    const destinationAddRef = useRef<HTMLInputElement>(null);
+    const addFormRef = useRef<HTMLFormElement>(null);
+    const editorRef = useRef<HTMLElement>(null);
     const analysis = useMemo(() => analyze(doc.flows), [doc.flows]);
+    const percentageReference = useMemo(() => getPercentageReference(doc, analysis), [doc, analysis]);
+    const percentageBase = analysis.nodes.some(node => node.name === doc.appearance.percentageBase)
+        ? doc.appearance.percentageBase ?? "" : "";
+    const showPercentages = doc.appearance.values && doc.appearance.valueDisplay !== "values";
     const nodeChoices = useMemo(() => analysis.nodes.map((node, index) => ({
         name: node.name, color: nodeColor(node.name, index, doc.appearance.palette),
     })), [analysis.nodes, doc.appearance.palette]);
@@ -343,6 +360,10 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
             setFuture([]);
             setSelected(null);
             setAdding(false);
+            setNewFlowNames({ from: "", to: "" });
+            setNewFlowAmount("");
+            setRemainingSource(null);
+            setEditorAction(null);
             setAddError("");
             setRenaming(false);
             setMenu(null);
@@ -369,9 +390,22 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
         return () => clearTimeout(t);
     }, [toast]);
     useEffect(() => {
-        if (adding) firstAddRef.current?.focus();
-        else setNewFlowNames({ from: "", to: "" });
-    }, [adding]);
+        if (adding) {
+            const input = editorAction?.kind === "add" ? destinationAddRef.current : firstAddRef.current;
+            input?.focus({ preventScroll: true });
+            if (editorAction?.kind === "add") addFormRef.current?.scrollIntoView?.({ block: "nearest" });
+        } else {
+            setNewFlowNames({ from: "", to: "" });
+            setNewFlowAmount("");
+            setRemainingSource(null);
+        }
+        if (editorAction?.kind === "review") {
+            const rows = Array.from(editorRef.current?.querySelectorAll<HTMLElement>(".flow-row-wrap") ?? []);
+            const row = rows.find(item => item.dataset.flowFrom === editorAction.name);
+            row?.querySelector<HTMLInputElement>(".amount-input")?.focus({ preventScroll: true });
+            (row ?? editorRef.current)?.scrollIntoView?.({ block: "center" });
+        }
+    }, [adding, editorAction]);
     useEffect(() => {
         if (renaming) {
             titleComposing.current = false;
@@ -437,6 +471,9 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
     });
     function activate(id: string) {
         setNewFlowNames({ from: "", to: "" });
+        setNewFlowAmount("");
+        setRemainingSource(null);
+        setEditorAction(null);
         setLibrary((l) => ({ ...l, activeId: id }));
         setPast([]);
         setFuture([]);
@@ -451,6 +488,9 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
     }
     function addDocument(next: Diagram) {
         setNewFlowNames({ from: "", to: "" });
+        setNewFlowAmount("");
+        setRemainingSource(null);
+        setEditorAction(null);
         setLibrary((l) => ({
             ...l,
             activeId: next.id,
@@ -500,6 +540,10 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
             setFuture([]);
             setSelected(null);
             setAdding(false);
+            setNewFlowNames({ from: "", to: "" });
+            setNewFlowAmount("");
+            setRemainingSource(null);
+            setEditorAction(null);
             setAddError("");
             setRenaming(false);
             setZoom(100);
@@ -539,6 +583,48 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
         if (error) return error;
         update({ ...doc, flows });
         return null;
+    }
+    function renameDiagramNode(oldName: string, newName: string, allowMerge = false) {
+        const result = renameNode(doc, oldName, newName, allowMerge);
+        if (result.ok && result.diagram !== doc) {
+            update(result.diagram);
+            setSelected(current => current === oldName ? result.name : current);
+            setNewFlowNames(current => ({
+                from: current.from === oldName ? result.name : current.from,
+                to: current.to === oldName ? result.name : current.to,
+            }));
+            setRemainingSource(current => current === oldName ? result.name : current);
+            setFlowRowRevision(revision => revision + 1);
+        }
+        return result;
+    }
+    function reviewBalance(name: string) {
+        const node = analysis.balances.find(item => item.name === name);
+        if (!node) return;
+        const difference = balanceDifference(node);
+        setSelected(name);
+        setEditorOpen(true);
+        setFocusMode(false);
+        setTab("data");
+        if (difference > 0) {
+            if (doc.flows.length >= 300) {
+                setToast("This diagram has 300 flows. Update an existing flow or remove one before adding the remainder.");
+                return;
+            }
+            if (!Number.isFinite(difference) || difference > 1e15) {
+                setToast("The remainder is larger than one flow can hold. Add it in smaller amounts, up to 1 quadrillion each.");
+                return;
+            }
+            setNewFlowNames({ from: name, to: "" });
+            setNewFlowAmount(String(difference));
+            setRemainingSource(name);
+            setAddError("");
+            setAdding(true);
+            setEditorAction({ kind: "add", name, revision: ++editorActionRevision.current });
+        } else {
+            setAdding(false);
+            setEditorAction({ kind: "review", name, revision: ++editorActionRevision.current });
+        }
     }
     function addFlow(e: FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -908,6 +994,49 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                 </button>
                             </div>
                         </div>
+                        <div className="diagram-label-controls" role="group" aria-label="Diagram labels">
+                            <label>
+                                Show
+                                <select
+                                    aria-label="Diagram numbers"
+                                    value={doc.appearance.values ? doc.appearance.valueDisplay : "hidden"}
+                                    onChange={event => update({
+                                        ...doc,
+                                        appearance: {
+                                            ...doc.appearance,
+                                            values: event.target.value !== "hidden",
+                                            valueDisplay: event.target.value === "hidden"
+                                                ? doc.appearance.valueDisplay
+                                                : event.target.value as Diagram["appearance"]["valueDisplay"],
+                                        },
+                                    })}
+                                >
+                                    <option value="values">Values</option>
+                                    <option value="percentages">Percentages</option>
+                                    <option value="both">Both</option>
+                                    <option value="hidden">Hidden</option>
+                                </select>
+                            </label>
+                            {showPercentages && (
+                                <>
+                                    <label className="percentage-base-control">
+                                        Percent of
+                                        <select
+                                            aria-label="Percentage base"
+                                            value={percentageBase}
+                                            onChange={event => update({
+                                                ...doc,
+                                                appearance: { ...doc.appearance, percentageBase: event.target.value || null },
+                                            })}
+                                        >
+                                            <option value="">Total inflow</option>
+                                            {analysis.nodes.map(node => <option key={node.name} value={node.name}>{node.name}</option>)}
+                                        </select>
+                                    </label>
+                                    <span className="percentage-base-value">{formatAmount(percentageReference.value, doc)}</span>
+                                </>
+                            )}
+                        </div>
                         <div className="canvas-area">
                             <div className="diagram-scroll">
                                 <div
@@ -926,6 +1055,8 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                         selected={selected}
                                         onSelect={setSelected}
                                         onRenameColumn={(depth, title) => update(renameColumn(doc, depth, title))}
+                                        onRenameNode={renameDiagramNode}
+                                        onBalanceAction={reviewBalance}
                                         zoom={zoom}
                                     />
                                 </div>
@@ -941,8 +1072,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                         </button>
                                     ) : (
                                         <>
-                                            <span className="hint-dot" /> Select
-                                            a node to follow its flows
+                                            <span className="hint-dot" /> Click a name to rename; select a bar to follow its flows
                                         </>
                                     )}
                                 </span>
@@ -1001,7 +1131,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                         </div>
                     </div>
 
-                    <aside id="flow-editor" className="editor-panel">
+                    <aside ref={editorRef} id="flow-editor" className="editor-panel">
                         <div
                             className="editor-tabs"
                             role="tablist"
@@ -1081,7 +1211,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                         </div>
                                         {doc.flows.map((f) => (
                                             <FlowRow
-                                                key={`${doc.id}:${editorRevision}:${f.id}`}
+                                                key={`${doc.id}:${editorRevision}:${flowRowRevision}:${f.id}`}
                                                 flow={f}
                                                 nodes={nodeChoices}
                                                 amountLabel={doc.numberFormat === "integer" ? "Count" : "Amount"}
@@ -1119,6 +1249,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                     </div>
                                     {adding ? (
                                         <form
+                                            ref={addFormRef}
                                             className="add-form"
                                             onSubmit={addFlow}
                                         >
@@ -1135,6 +1266,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                                     <X size={15} />
                                                 </button>
                                             </div>
+                                            {remainingSource && <p className="add-remaining-note">Remaining from <strong>{remainingSource}</strong>. Choose a destination below.</p>}
                                             <div className="add-fields">
                                                 <div className="node-field">
                                                     <label htmlFor="new-flow-from">From</label>
@@ -1147,7 +1279,10 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                                         placeholder="e.g. Salary"
                                                         nodes={nodeChoices}
                                                         value={newFlowNames.from}
-                                                        onValueChange={from => setNewFlowNames(previous => ({ ...previous, from }))}
+                                                        onValueChange={from => {
+                                                            setNewFlowNames(previous => ({ ...previous, from }));
+                                                            if (from !== remainingSource) setRemainingSource(null);
+                                                        }}
                                                     />
                                                 </div>
                                                 <ArrowRight size={15} />
@@ -1155,6 +1290,7 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                                     <label htmlFor="new-flow-to">To</label>
                                                     <NodeCombobox
                                                         inputId="new-flow-to"
+                                                        inputRef={destinationAddRef}
                                                         required
                                                         name="to"
                                                         label="To node"
@@ -1172,6 +1308,8 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                                 <input
                                                     required
                                                     name="amount"
+                                                    value={newFlowAmount}
+                                                    onChange={event => setNewFlowAmount(event.target.value)}
                                                     inputMode="decimal"
                                                     placeholder="0"
                                                     autoComplete="off"
@@ -1196,6 +1334,9 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                         <button
                                             className="add-flow-button"
                                             onClick={() => {
+                                                setEditorAction(null);
+                                                setRemainingSource(null);
+                                                setNewFlowAmount("");
                                                 setAdding(true);
                                                 setAddError("");
                                             }}
@@ -1213,27 +1354,28 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                     )}
                                     {analysis.balances.length > 0 && (
                                         <div className="balance-warning">
-                                            <AlertCircle size={16} />
-                                            <div>
-                                                <strong>
-                                                    Some amounts don’t balance
-                                                </strong>
-                                                {analysis.balances.map((n) => (
-                                                    <p key={n.name}>
-                                                        {n.name}:{" "}
-                                                        {formatAmount(
-                                                            n.incoming,
-                                                            doc,
-                                                        )}{" "}
-                                                        in,{" "}
-                                                        {formatAmount(
-                                                            n.outgoing,
-                                                            doc,
-                                                        )}{" "}
-                                                        out.
-                                                    </p>
-                                                ))}
-                                            </div>
+                                            <div className="balance-warning-heading"><AlertCircle size={16} /><strong>Amounts to review</strong></div>
+                                            {analysis.balances.map(node => {
+                                                const difference = balanceDifference(node);
+                                                const remaining = difference > 0;
+                                                return (
+                                                    <div className="balance-review-row" key={node.name}>
+                                                        <div className="balance-review-copy">
+                                                            <strong>{node.name}</strong>
+                                                            <p>{formatAmount(Math.abs(difference), doc)} {remaining ? "left to allocate" : "more out than in"}</p>
+                                                            <small>{formatAmount(node.incoming, doc)} in · {formatAmount(node.outgoing, doc)} out</small>
+                                                        </div>
+                                                        <button
+                                                            className="button balance-review-button"
+                                                            onClick={() => reviewBalance(node.name)}
+                                                            aria-label={`${remaining ? "Add remaining flow from" : "Review flows for"} ${node.name}`}
+                                                        >
+                                                            {remaining ? <Plus size={14} /> : <ListFilter size={14} />}
+                                                            {remaining ? "Add remaining flow" : "Review flows"}
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
                                         </div>
                                     )}
                                 </>
@@ -1325,9 +1467,9 @@ export default function App({ initialLibrary }: { initialLibrary?: Library } = {
                                     </label>
                                     <label className="switch-row">
                                         <span>
-                                            Show amounts
+                                            Show numbers
                                             <small>
-                                                Keep the numbers in view
+                                                Values, percentages, or both
                                             </small>
                                         </span>
                                         <input

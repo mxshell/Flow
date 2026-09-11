@@ -1,0 +1,26 @@
+.node-name-button{cursor:text;outline:none}
+.node-name-hit{transition:fill .15s,stroke .15s}
+.node-name-button:hover .node-name-hit{fill:#f0f1fb;stroke:#dfe2f2}
+.node-name-button:focus-visible .node-name-hit{fill:#f5f5ff;stroke:#9299f3;stroke-width:2}
+.node-name-text{pointer-events:none}
+.node-name-pencil{color:#a2a7b5;opacity:0;transition:opacity .15s;pointer-events:none}
+.node-name-button:hover .node-name-pencil,.node-name-button:focus-visible .node-name-pencil{color:var(--primary);opacity:1}
+.node-name-button[aria-hidden="true"] .node-name-pencil{opacity:0}
+.node-name-foreign{overflow:visible}
+.node-name-editor{margin:2px;padding:7px;border:1px solid #9c9fea;border-radius:7px;background:#fff;color:var(--ink);font-family:'DM Sans Variable',sans-serif;box-shadow:0 4px 14px #26314e1a;text-align:left}
+.node-name-input-row{display:flex;align-items:center;gap:3px;min-width:0}
+.node-name-input{width:0;min-width:0;flex:1;height:32px;padding:4px 6px;border:0;border-radius:3px;background:#fff;color:#3a435c;font:550 15px 'DM Sans Variable',sans-serif;outline-offset:0}
+.node-name-input:focus-visible{outline:2px solid #b8bcf1;outline-offset:0}
+.node-name-input-row>button{display:flex;align-items:center;justify-content:center;flex-shrink:0;width:26px;height:28px;padding:0;border:0;border-radius:4px;background:transparent;cursor:pointer}
+.node-name-save{color:var(--primary)}
+.node-name-cancel{color:#7d879e}
+.node-name-input-row>button:hover{background:#f0f1fb}
+.node-name-editor button:focus-visible{outline:2px solid #9c9fea;outline-offset:1px}
+.node-name-issue{margin:9px 4px 3px;color:#7d4f3a;font-size:12px;font-weight:400;line-height:1.5;overflow-wrap:anywhere}
+.node-name-merge-actions{display:flex;flex-wrap:wrap;gap:6px;margin:10px 3px 3px}
+.node-name-merge-actions>button{min-height:30px;padding:5px 10px;border:1px solid transparent;border-radius:5px;font:500 12px 'DM Sans Variable',sans-serif;cursor:pointer}
+.node-name-merge{background:var(--primary);color:#fff}
+.node-name-merge:hover{filter:brightness(.94)}
+.node-name-keep{background:#f4f5fa;color:#606b83}
+.node-name-keep:hover{background:#eceef7}
+@media(prefers-reduced-motion:reduce){.node-name-hit,.node-name-pencil{transition:none}}

@@ -1,5 +1,5 @@
 export type Flow = { id: string; from: string; to: string; amount: number };
-export type Appearance = { palette: 'original' | 'ocean' | 'sunset'; labels: boolean; values: boolean; opacity: number; nodeWidth: number };
+export type Appearance = { palette: 'original' | 'ocean' | 'sunset'; labels: boolean; values: boolean; valueDisplay: 'values' | 'percentages' | 'both'; percentageBase: string | null; opacity: number; nodeWidth: number };
 export const currencies = [
   { code: 'USD', name: 'US dollar' },
   { code: 'SGD', name: 'Singapore dollar' },
@@ -40,7 +40,7 @@ export function renameColumn(doc: Diagram, depth: number, title: string): Diagra
   return { ...doc, columnTitles };
 }
 export const defaultNumberSettings: NumberSettings = { numberFormat: 'currency', currency: 'USD' };
-export const appearance: Appearance = { palette: 'original', labels: true, values: true, opacity: 0.34, nodeWidth: 13 };
+export const appearance: Appearance = { palette: 'original', labels: true, values: true, valueDisplay: 'values', percentageBase: null, opacity: 0.34, nodeWidth: 13 };
 export const uid = () => crypto.randomUUID();
 const rows = (data: [string, string, number][]): Flow[] => data.map(([from, to, amount]) => ({ id: uid(), from, to, amount }));
 export function template(kind: 'budget' | 'business' | 'jobs'): Diagram {
@@ -96,8 +96,71 @@ export function analyze(flows: Flow[]) {
     visiting.delete(name); visited.add(name); return false;
   }
   if ([...nodes.keys()].some(cycle)) errors.push('This connection creates a loop. Flows must move forward, without returning to an earlier step.');
-  const balances = [...nodes.values()].filter(n => n.incoming > 0 && n.outgoing > 0 && Math.abs(n.incoming - n.outgoing) > 1e-9 * Math.max(n.incoming, n.outgoing));
+  const balances = [...nodes.values()].filter(n => n.incoming > 0 && n.outgoing > 0 && balanceDifference(n) !== 0);
   return { nodes: [...nodes.values()], links: [...edges.values()], errors: [...new Set(errors)], balances, total: [...nodes.values()].filter(n => n.incoming === 0).reduce((s, n) => s + n.outgoing, 0) };
+}
+
+export type NodeRenameResult = { ok: true; diagram: Diagram; name: string } | { ok: false; error: string; mergeRequired?: boolean };
+
+/** Rename every connection together, preserving row identities and undoable source data. */
+export function renameNode(doc: Diagram, oldName: string, newName: string, allowMerge = false): NodeRenameResult {
+  const previous = oldName.trim(), name = newName.trim();
+  if (!name) return { ok: false, error: 'Enter a name for this node.' };
+  if (name.length > 60) return { ok: false, error: 'Keep names to 60 characters or fewer.' };
+  const names = new Set(doc.flows.flatMap(flow => [flow.from.trim(), flow.to.trim()]));
+  if (!names.has(previous)) return { ok: false, error: 'This node no longer exists.' };
+  if (previous === name) return { ok: true, diagram: doc, name };
+  const flows = doc.flows.map(flow => {
+    const from = flow.from.trim() === previous ? name : flow.from;
+    const to = flow.to.trim() === previous ? name : flow.to;
+    return from === flow.from && to === flow.to ? flow : { ...flow, from, to };
+  });
+  if (flows.some(flow => flow.from.trim() === flow.to.trim())) {
+    return { ok: false, error: `Renaming to “${name}” would connect a node to itself. Choose another name.` };
+  }
+  const result = analyze(flows);
+  if (result.errors.length) return { ok: false, error: result.errors[0] };
+  if (names.has(name) && !allowMerge) {
+    return { ok: false, error: `“${name}” already exists. Merge the nodes to combine their connections.`, mergeRequired: true };
+  }
+  return { ok: true, name, diagram: {
+    ...doc,
+    flows,
+    appearance: doc.appearance.percentageBase === previous
+      ? { ...doc.appearance, percentageBase: name }
+      : doc.appearance,
+  } };
+}
+
+/** Keep actions and warnings consistent, including very small fractional flows. */
+export function balanceDifference(node: { incoming: number; outgoing: number }): number {
+  const difference = node.incoming - node.outgoing;
+  return Math.abs(difference) <= 1e-9 * Math.max(node.incoming, node.outgoing) ? 0 : difference;
+}
+
+/** A named node uses received flow, or sent flow when it is a source. */
+export function getPercentageReference(doc: Diagram, analysis = analyze(doc.flows)): { name: string; value: number } {
+  const node = analysis.nodes.find(item => item.name === doc.appearance.percentageBase);
+  return node
+    ? { name: node.name, value: node.incoming > 0 ? node.incoming : node.outgoing }
+    : { name: 'Total inflow', value: analysis.total };
+}
+
+const percentageFormatter = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 });
+export function formatPercentage(value: number, base: number): string {
+  if (!Number.isFinite(value) || value < 0 || !Number.isFinite(base) || base <= 0) return '—';
+  if (value === 0) return '0%';
+  // Use logarithms only for enormous ratios so even finite inputs whose division
+  // would overflow have a bounded, meaningful label instead of Infinity%.
+  const logPercent = Math.log10(value) - Math.log10(base) + 2;
+  if (logPercent >= 9) {
+    let exponent = Math.floor(logPercent);
+    let coefficient = Math.round(10 ** (logPercent - exponent) * 10) / 10;
+    if (coefficient === 10) { coefficient = 1; exponent += 1; }
+    return `${coefficient}e+${exponent}%`;
+  }
+  const percent = value / base * 100;
+  return percent < 0.1 ? '<0.1%' : `${percentageFormatter.format(percent)}%`;
 }
 
 const formatters = new Map<string, Intl.NumberFormat>();
@@ -176,5 +239,5 @@ export function parseDocument(raw: unknown): Diagram {
     ? d.columnTitles.slice(0, 301).map(title => typeof title === 'string' ? cleanColumnTitle(title) : '')
     : defaultColumnTitles(kind);
   return { version: 2, id: typeof d.id === 'string' && d.id.trim() ? d.id : uid(), title: d.title.slice(0, 100) || 'Untitled diagram', columnTitles, numberFormat, currency, kind, flows,
-    appearance: { palette: typeof a.palette === 'string' && Object.hasOwn(palettes, a.palette) ? a.palette : 'original', labels: typeof a.labels === 'boolean' ? a.labels : true, values: typeof a.values === 'boolean' ? a.values : true, opacity: typeof a.opacity === 'number' && a.opacity >= 0.1 && a.opacity <= 0.8 ? a.opacity : 0.34, nodeWidth: typeof a.nodeWidth === 'number' && a.nodeWidth >= 6 && a.nodeWidth <= 28 ? a.nodeWidth : 13 } };
+    appearance: { palette: typeof a.palette === 'string' && Object.hasOwn(palettes, a.palette) ? a.palette : 'original', labels: typeof a.labels === 'boolean' ? a.labels : true, values: typeof a.values === 'boolean' ? a.values : true, valueDisplay: ['values', 'percentages', 'both'].includes(a.valueDisplay as string) ? a.valueDisplay! : 'values', percentageBase: typeof a.percentageBase === 'string' && result.nodes.some(node => node.name === a.percentageBase!.trim()) ? a.percentageBase.trim() : null, opacity: typeof a.opacity === 'number' && a.opacity >= 0.1 && a.opacity <= 0.8 ? a.opacity : 0.34, nodeWidth: typeof a.nodeWidth === 'number' && a.nodeWidth >= 6 && a.nodeWidth <= 28 ? a.nodeWidth : 13 } };
 }

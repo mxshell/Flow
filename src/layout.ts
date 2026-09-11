@@ -22,9 +22,15 @@ export function buildLayout(doc: Diagram, availableWidth = 1000) {
   const columns = new Map<number, number>();
   data.nodes.forEach(n => { const d = depth(n.name); columns.set(d, (columns.get(d) ?? 0) + 1); });
   const maxDepth = Math.max(...depths.values());
-  const height = Math.max(590, Math.max(...columns.values()) * 62 + 150);
+  const numericLines = doc.appearance.values ? (doc.appearance.valueDisplay === 'both' ? 2 : 1) : 0;
+  const labelLines = Number(doc.appearance.labels) + numericLines + Number(data.balances.length > 0);
+  // Intermediate labels sit above their bars. Reserve enough space for the
+  // complete label and its edit/action targets, even when the next bar is tiny.
+  const nodePadding = Math.max(32, labelLines * 20 + 12);
+  const height = Math.max(590, Math.max(...columns.values()) * (nodePadding + 18) + 150);
+  const labelTop = Math.max(100, 60 + labelLines * 20);
   const width = Math.max(760, availableWidth, maxDepth * 220 + 340);
-  const layout = sankey<NodeData, LinkData>().nodeId(n => n.name).nodeAlign(sankeyLeft).nodeWidth(doc.appearance.nodeWidth).nodePadding(32).nodeSort(null).iterations(48).extent([[155, 100], [width - 195, height - 60]]);
+  const layout = sankey<NodeData, LinkData>().nodeId(n => n.name).nodeAlign(sankeyLeft).nodeWidth(doc.appearance.nodeWidth).nodePadding(nodePadding).nodeSort(null).iterations(48).extent([[155, labelTop], [width - 195, height - 60]]);
   // D3 divides available height by flow totals. Subnormal amounts can otherwise
   // produce Infinity/NaN even though every entered amount is finite and valid.
   const valueScale = Math.max(...data.links.map(link => link.value));

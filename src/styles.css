@@ -83,3 +83,28 @@ main{max-width:none;margin:0 auto;padding:35px 42px 0}.page-heading{display:flex
 .flow-benefits h3{font-size:14px;font-weight:600;color:#46506a}
 .noscript-notice{margin:20px auto;max-width:900px;padding:12px 20px;color:#46506a;font:14px/1.6 system-ui,sans-serif;text-align:center}
 @media(max-width:760px){.about-flow{padding-top:28px}.flow-benefits{grid-template-columns:1fr;gap:20px;margin-top:22px}.about-flow>h2{font-size:19px}}
+
+/* Display controls share the diagram's quiet, compact toolbar treatment. */
+.diagram-label-controls{display:flex;align-items:center;flex-wrap:wrap;gap:9px 22px;padding:10px 22px;border-bottom:1px solid var(--border);background:#fff;min-height:47px}
+.diagram-label-controls label{display:flex;align-items:center;gap:9px;min-width:0;font-size:12px;color:#8892a5;white-space:nowrap}
+.diagram-label-controls select{max-width:230px;min-height:28px;padding:4px 24px 4px 9px;border:1px solid #e3e6ef;border-radius:5px;background:#fcfcff;color:#66718a;font-size:12px;font-weight:500;cursor:pointer;text-overflow:ellipsis}
+.diagram-label-controls select:hover{border-color:#bdc3dc;background:#fff}
+.percentage-base-value{font-size:12px;color:#98a0af;font-variant-numeric:tabular-nums;margin-left:-12px}
+.add-remaining-note{font-size:12px;line-height:1.6;color:#7d85a0;margin:2px 0 12px;overflow-wrap:anywhere}
+.add-remaining-note strong{font-weight:600;color:#697293}
+.balance-warning{display:block;max-width:900px;padding:0 15px;color:#916d33}
+.balance-warning-heading{display:flex;align-items:center;gap:7px;padding:13px 0 9px}
+.balance-review-row{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 0;border-top:1px solid #efe3c8}
+.balance-review-copy{min-width:0;overflow-wrap:anywhere}
+.balance-review-copy>strong{color:#725a35;font-size:13px}
+.balance-review-copy p{margin-top:1px;font-size:13px}
+.balance-review-copy small{display:block;font-size:11px;color:#a58a5f;margin-top:2px;font-variant-numeric:tabular-nums}
+.button.balance-review-button{border:1px solid #e9d8b5;background:#fffdf7;color:#8c6d37;min-height:32px;padding:6px 10px;font-size:12px;flex-shrink:0;gap:5px}
+.button.balance-review-button:hover{border-color:#cbb079;background:#fff9e9}
+.node-select{cursor:pointer;outline:none}
+.node-select:focus-visible rect{stroke:#4d56bd;stroke-width:3}
+.node-balance-action{cursor:pointer;outline:none}
+.node-balance-action:hover text,.node-balance-action:focus-visible text{text-decoration:underline;text-underline-offset:3px}
+.node-balance-action:focus-visible rect{stroke:#ad8748;stroke-width:1}
+@media(max-width:760px){.diagram-label-controls{padding:10px 16px;gap:8px 16px}.diagram-label-controls select{max-width:180px}.percentage-base-value{margin-left:0}.balance-review-row{flex-wrap:wrap;gap:9px}.balance-review-button{margin-bottom:2px}}
+@media(max-width:440px){.percentage-base-control{flex:1 1 100%}.percentage-base-control select{flex:1;max-width:100%;min-width:0}.percentage-base-value{margin-left:68px;margin-top:-3px}}

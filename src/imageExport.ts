@@ -10,8 +10,8 @@ export function pngDimensions(width: number, height: number) {
 export function exportSvg(source: SVGSVGElement, title: string, opacity: number) {
     const svg = source.cloneNode(true) as SVGSVGElement;
     svg.querySelector('.chart-tooltip')?.remove();
-    svg.querySelectorAll('[data-export-omit], .column-title-button > title').forEach(element => element.remove());
-    svg.querySelectorAll('.column-title-text').forEach(element => element.setAttribute('opacity', '1'));
+    svg.querySelectorAll('[data-export-omit], .column-title-button > title, .node-name-button > title').forEach(element => element.remove());
+    svg.querySelectorAll('.column-title-text, .node-name-text').forEach(element => element.setAttribute('opacity', '1'));
     svg.querySelectorAll('.sankey-node rect').forEach(element => element.setAttribute('stroke', 'none'));
     svg.querySelectorAll('.sankey-link').forEach(element => element.setAttribute('opacity', String(opacity)));
     svg.querySelectorAll('[tabindex], [aria-pressed], [aria-hidden], [role="button"]').forEach(element => {

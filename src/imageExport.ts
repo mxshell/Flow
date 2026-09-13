@@ -25,6 +25,18 @@ export function exportSvg(source: SVGSVGElement, title: string, opacity: number)
     svg.setAttribute('height', String(height));
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', title);
+    // Preserve measured widths when the exported image uses its portable font.
+    // Otherwise a wider fallback glyph could cross the label lane's boundary.
+    const labelKey = (element: SVGTextElement) => JSON.stringify([element.textContent, element.getAttribute('x'), element.getAttribute('y')]);
+    const sourceLabels = new Map(Array.from(source.querySelectorAll<SVGTextElement>('text[data-max-width]'))
+        .map(element => [labelKey(element), element]));
+    svg.querySelectorAll<SVGTextElement>('text[data-max-width]').forEach(element => {
+        const measured = sourceLabels.get(labelKey(element))?.getComputedTextLength?.();
+        if (measured && Number.isFinite(measured)) {
+            element.setAttribute('textLength', String(Math.min(measured, Number(element.dataset.maxWidth))));
+            element.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+        }
+    });
     svg.style.fontFamily = 'Arial, sans-serif';
     svg.style.minWidth = '';
     svg.style.minHeight = '';

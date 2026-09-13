@@ -23,8 +23,9 @@ function show(doc: Diagram, onBalanceAction = vi.fn()) {
 }
 function node(container: HTMLElement, name: string) {
   const button = Array.from(container.querySelectorAll('[data-node-name]')).find(item => item.getAttribute('data-node-name') === name);
-  if (!button?.parentElement?.parentElement) throw new Error(`Missing node ${name}`);
-  return button.parentElement.parentElement;
+  const group = button?.closest('.sankey-node');
+  if (!group) throw new Error(`Missing node ${name}`);
+  return group;
 }
 
 describe('chart numbers and balance actions', () => {
@@ -81,11 +82,14 @@ describe('chart numbers and balance actions', () => {
     const doc = template('budget');
     doc.appearance.valueDisplay = 'both';
     doc.flows = Array.from({ length: 12 }, (_, index) => ({ id: String(index), from: 'Income', to: `Expense ${index}`, amount: index === 0 ? 100000 : 1 }));
-    const layout = buildLayout(doc)!;
-    const destinations = layout.graph.nodes.filter(item => item.name !== 'Income');
-    for (let index = 1; index < destinations.length; index++) {
-      const previous = destinations[index - 1], current = destinations[index];
-      expect((current.y0! + current.y1!) / 2 - (previous.y0! + previous.y1!) / 2).toBeGreaterThanOrEqual(46);
+    const { container } = show(doc);
+    const names = doc.flows.map(flow => flow.to);
+    for (let index = 1; index < names.length; index++) {
+      const previous = node(container, names[index - 1]);
+      const current = node(container, names[index]);
+      const previousBottom = Math.max(...Array.from(previous.querySelectorAll('text')).map(text => Number(text.getAttribute('y')) + 5));
+      const nextTop = Number(current.querySelector('.node-name-hit')!.getAttribute('y'));
+      expect(nextTop).toBeGreaterThan(previousBottom);
     }
   });
 });

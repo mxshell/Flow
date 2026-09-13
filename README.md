@@ -25,6 +25,7 @@ pnpm dev
 - Consistent column headings on every diagram. Click a heading or its pencil to rename it in place; Enter or clicking away saves, and Escape cancels.
 - PNG and SVG image export, plus JSON export/import for editable backups.
 - Cycle prevention and actionable balance feedback. Add remaining flow prepares the source and unallocated amount for confirmation; Review flows takes you to outgoing amounts when a node is overallocated. Larger graphs expand in a scrollable canvas.
+- Measured label layout prevents overlapping names, values, percentages, and balance actions. Nodes and their labels move together; the canvas expands only when necessary. Layout updates after editing, resizing, changing display settings, or loading fonts.
 - Keyboard navigation, responsive layouts, and reduced-motion support.
 
 Click a diagram title to rename it. Use the same exact node name to join flows; names are case-sensitive. An individual flow amount must be positive and at most 1 quadrillion. Each diagram supports up to 300 flows. Total flow counts sources only, so intermediate steps are not counted twice.

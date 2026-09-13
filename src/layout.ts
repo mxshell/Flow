@@ -24,8 +24,8 @@ export function buildLayout(doc: Diagram, availableWidth = 1000) {
   const maxDepth = Math.max(...depths.values());
   const numericLines = doc.appearance.values ? (doc.appearance.valueDisplay === 'both' ? 2 : 1) : 0;
   const labelLines = Number(doc.appearance.labels) + numericLines + Number(data.balances.length > 0);
-  // Intermediate labels sit above their bars. Reserve enough space for the
-  // complete label and its edit/action targets, even when the next bar is tiny.
+  // Keep the established flow thickness and density as the starting geometry.
+  // labelLayout then resolves actual collisions using measured rectangles.
   const nodePadding = Math.max(32, labelLines * 20 + 12);
   const height = Math.max(590, Math.max(...columns.values()) * (nodePadding + 18) + 150);
   const labelTop = Math.max(100, 60 + labelLines * 20);

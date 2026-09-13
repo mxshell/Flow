@@ -1,8 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { sankeyLinkHorizontal } from "d3-sankey";
-import { balanceDifference, columnTitle, formatAmount, formatPercentage, getPercentageReference } from "./model";
+import { columnTitle, formatAmount, formatPercentage, getPercentageReference } from "./model";
 import type { Diagram, NodeRenameResult } from "./model";
 import { buildLayout } from "./layout";
+import { layoutWithLabels } from "./labelLayout";
+import type { LabelBounds } from "./labelLayout";
+import { nodeLabel, measureNodeLabel } from "./chartLabels";
 import ColumnTitle from "./ColumnTitle";
 import NodeName from "./NodeName";
 import { shortenLabel } from "./text";
@@ -51,18 +54,28 @@ export default function SankeyChart({
         source: string;
         target: string;
     } | null>(null);
-    const result = useMemo(
+    const base = useMemo(
         () => buildLayout(doc, availableWidth),
         [
             doc.flows,
             doc.appearance.nodeWidth,
             doc.appearance.palette,
+            doc.appearance.labels,
             doc.appearance.values,
             doc.appearance.valueDisplay,
             availableWidth,
         ],
     );
     const percentageReference = useMemo(() => getPercentageReference(doc), [doc.flows, doc.appearance.percentageBase]);
+    const labelSpecs = useMemo(() => new Map(base?.graph.nodes.map(node => [node.name,
+        nodeLabel(doc, node, base.maxDepth, base.width, Boolean(onBalanceAction), percentageReference.value)]) ?? []),
+        [base, doc, Boolean(onBalanceAction), percentageReference]);
+    const [measurements, setMeasurements] = useState<{
+        source: typeof labelSpecs; bounds: Map<string, LabelBounds>;
+    } | null>(null);
+    const result = useMemo(() => base && layoutWithLabels(base, measurements?.source === labelSpecs
+        ? measurements.bounds : new Map([...labelSpecs].map(([name, label]) => [name, label.bounds]))),
+        [base, labelSpecs, measurements]);
     const displayMode = doc.appearance.valueDisplay ?? "values";
     const showPercentages = doc.appearance.values && displayMode !== "values";
     useLayoutEffect(() => {
@@ -80,6 +93,22 @@ export default function SankeyChart({
                     text.setAttribute("lengthAdjust", "spacingAndGlyphs");
                 }
             });
+            if (!result) return;
+            const nodes = new Map(result.graph.nodes.map(node => [node.name, node]));
+            const bounds = new Map<string, LabelBounds>();
+            for (const group of svg!.querySelectorAll<SVGGElement>('[data-node-label]')) {
+                const name = group.dataset.nodeLabel!;
+                const node = nodes.get(name), label = labelSpecs.get(name);
+                if (node && label) bounds.set(name, measureNodeLabel(group, node, label.bounds));
+            }
+            setMeasurements(previous => {
+                if (previous?.source === labelSpecs && bounds.size === previous.bounds.size
+                    && [...bounds].every(([name, box]) => {
+                        const old = previous.bounds.get(name);
+                        return old && box.left === old.left && box.right === old.right && box.top === old.top && box.bottom === old.bottom;
+                    })) return previous;
+                return { source: labelSpecs, bounds };
+            });
         }
         fitLabels();
         void document.fonts.ready.then(fitLabels);
@@ -88,7 +117,7 @@ export default function SankeyChart({
             mounted = false;
             document.fonts.removeEventListener("loadingdone", fitLabels);
         };
-    }, [result, hover, doc.numberFormat, doc.currency, doc.appearance.labels, doc.appearance.values, displayMode, percentageReference]);
+    }, [result, labelSpecs, hover, percentageReference]);
     const path = sankeyLinkHorizontal<N, L>();
     if (!result)
         return (
@@ -102,7 +131,7 @@ export default function SankeyChart({
                 </p>
             </div>
         );
-    const { graph, width, height, maxDepth, headings } = result;
+    const { graph, width, height, headings } = result;
     const scale = zoom / 100;
     const connected = (link: Link) =>
         !selected ||
@@ -170,7 +199,7 @@ export default function SankeyChart({
                     title={columnTitle(doc, depth)}
                     depth={depth}
                     x={x}
-                    width={Math.min(260, index < headings.length - 1 ? headings[index + 1].x - x - 24 : index > 0 ? x - headings[index - 1].x - 24 : 260)}
+                    width={Math.max(40, Math.min(260, 2 * (x - 12), 2 * (width - x - 12), index < headings.length - 1 ? headings[index + 1].x - x - 24 : 260, index > 0 ? x - headings[index - 1].x - 24 : 260))}
                     onRename={title => onRenameColumn(depth, title)}
                 />
             ))}
@@ -202,27 +231,11 @@ export default function SankeyChart({
                 ))}
             </g>
             {[...graph.nodes].sort((a, b) => Number(a.name === editingNode) - Number(b.name === editingNode)).map((n) => {
-                const first = n.depth === 0,
-                    last = (n.sourceLinks?.length ?? 0) === 0;
-                const x = first ? n.x0! - 12 : last ? n.x1! + 12 : (n.x0! + n.x1!) / 2;
-                const anchor = first ? "end" : last ? "start" : "middle";
-                const amount = n.incoming > 0 ? n.incoming : n.outgoing;
-                const numbers = !doc.appearance.values ? [] : displayMode === "percentages"
-                    ? [formatPercentage(amount, percentageReference.value)]
-                    : displayMode === "both"
-                      ? [formatAmount(amount, doc, (n.depth ?? 0) > 0 && maxDepth > 3), formatPercentage(amount, percentageReference.value)]
-                      : [formatAmount(amount, doc, (n.depth ?? 0) > 0 && maxDepth > 3)];
-                const difference = n.incoming > 0 && n.outgoing > 0 ? balanceDifference(n) : 0;
-                const hasBalanceAction = difference !== 0 && Boolean(onBalanceAction);
-                const lineCount = Number(doc.appearance.labels) + numbers.length + Number(hasBalanceAction);
-                const y = first || last
-                    ? (n.y0! + n.y1!) / 2 + 5 - Math.max(0, lineCount - 1) * 10
-                    : n.y0! - 10 - Math.max(0, lineCount - 1) * 20;
-                const labelWidth = first ? x - 12 : last ? width - x - 12
-                    : Math.min(260, (width - 350) / Math.max(1, maxDepth) - 24);
-                const numericY = y + (doc.appearance.labels ? 20 : 0);
-                const balanceY = numericY + numbers.length * 20;
-                const balanceLabel = `${formatAmount(Math.abs(difference), doc, true)} ${difference > 0 ? "left · Add" : "over · Review"}`;
+                const label = labelSpecs.get(n.name)!;
+                const { anchor, amount, numbers, difference, hasBalanceAction, balanceLabel } = label;
+                const x = n.x0! + label.x, y = n.y0! + label.y;
+                const numericY = n.y0! + label.numericY, balanceY = n.y0! + label.balanceY;
+                const labelWidth = label.width;
                 return (
                     <g key={n.name} className="sankey-node">
                         <g
@@ -249,6 +262,7 @@ export default function SankeyChart({
                                 strokeWidth="2"
                             />
                         </g>
+                        <g data-node-label={n.name}>
                         {numbers.map((number, index) => (
                             <text key={index} x={x} y={numericY + index * 20} textAnchor={anchor}
                                 fill="#727c92" fontSize="14" fontWeight="450" data-max-width={labelWidth}>
@@ -287,6 +301,7 @@ export default function SankeyChart({
                                 {shortenLabel(n.name, 22)}
                             </text>
                         ))}
+                        </g>
                     </g>
                 );
             })}
